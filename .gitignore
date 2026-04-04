@@ -1,0 +1,26 @@
+# AI 代理与本地治理文档
+.agentdocs/
+CLAUDE.md
+AGENTS.md
+
+# Python 虚拟环境与缓存
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+
+# IDE 与系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 本地临时文件
+*.tmp
+*.temp
+*.log

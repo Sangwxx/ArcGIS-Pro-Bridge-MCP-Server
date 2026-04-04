@@ -1,0 +1,42 @@
+[project]
+name = "arcgis-pro-bridge-mcp"
+version = "0.1.0"
+description = "通过 MCP 桥接 AI Agent 与本地 ArcGIS Pro 的 Python 服务端。"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["mcp", "arcgis", "arcgis-pro", "arcpy", "gis"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "mcp[cli]>=1.9.4",
+]
+
+[project.scripts]
+arcgis-mcp-server = "arcgis_mcp_server:main"
+
+[dependency-groups]
+dev = [
+  "ruff>=0.11.2",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+  "B",
+  "E",
+  "F",
+  "I",
+  "S",
+]
+ignore = [
+  "S101",
+]
