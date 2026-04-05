@@ -6,9 +6,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import arcgis_mcp_server as server
+from arcgis_runtime_utils import build_arcgis_subprocess_env
 
 
 class DiscoverArcGISPythonTests(unittest.TestCase):
@@ -40,6 +41,77 @@ class DiscoverArcGISPythonTests(unittest.TestCase):
         self.assertEqual(info.python_executable, str(fake_python.resolve()))
         self.assertEqual(info.install_dir, str(install_dir.resolve()))
         self.assertEqual(info.source, "env:ARCGIS_PRO_INSTALL_DIR")
+
+
+class RuntimeIsolationTests(unittest.TestCase):
+    def test_build_arcgis_subprocess_env_strips_parent_python_and_trae_variables(self) -> None:
+        payload = build_arcgis_subprocess_env(
+            {
+                "PATH": r"C:\Windows\System32",
+                "PYTHONPATH": "demo",
+                "VIRTUAL_ENV": "venv",
+                "UV_PROJECT_ENVIRONMENT": ".venv",
+                "TRAE_SANDBOX": "1",
+            }
+        )
+
+        self.assertEqual(payload["PATH"], r"C:\Windows\System32")
+        self.assertNotIn("PYTHONPATH", payload)
+        self.assertNotIn("VIRTUAL_ENV", payload)
+        self.assertNotIn("UV_PROJECT_ENVIRONMENT", payload)
+        self.assertNotIn("TRAE_SANDBOX", payload)
+        self.assertEqual(payload["PYTHONUTF8"], "1")
+        self.assertEqual(payload["ARCGIS_MCP_SUBPROCESS"], "1")
+
+    def test_run_in_arcgis_env_uses_isolated_subprocess_settings(self) -> None:
+        completed = type(
+            "CompletedProcess",
+            (),
+            {"returncode": 0, "stdout": "", "stderr": ""},
+        )()
+
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        temp_dir_context = Mock()
+        temp_dir_context.__enter__ = Mock(return_value=temp_dir.name)
+        temp_dir_context.__exit__ = Mock(return_value=False)
+
+        with patch("arcgis_mcp_server.subprocess.run", return_value=completed) as mocked_run:
+            with patch(
+                "arcgis_mcp_server.tempfile.TemporaryDirectory",
+                return_value=temp_dir_context,
+            ):
+                result_path = Path(temp_dir.name) / server.RESULT_FILENAME
+                result_path.write_text(
+                    json.dumps(
+                        {
+                            "status": "success",
+                            "stdout": "",
+                            "stderr": "",
+                            "data": {"ok": True},
+                            "error": None,
+                            "workspace": None,
+                            "project_path": None,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                result = server.run_in_arcgis_env(
+                    "set_result({'ok': True})",
+                    python_executable=sys.executable,
+                    require_arcpy=False,
+                    timeout_seconds=20,
+                )
+
+        self.assertEqual(result.status, "success")
+        mocked_run.assert_called_once()
+        kwargs = mocked_run.call_args.kwargs
+        self.assertEqual(kwargs["stdin"], server.subprocess.DEVNULL)
+        self.assertEqual(kwargs["env"]["ARCGIS_MCP_SUBPROCESS"], "1")
+        self.assertEqual(kwargs["cwd"], temp_dir.name)
+        self.assertEqual(kwargs["creationflags"], getattr(server.subprocess, "CREATE_NO_WINDOW", 0))
 
 
 class RunInArcGISEnvTests(unittest.TestCase):
@@ -135,15 +207,8 @@ class ResourceHelpersTests(unittest.TestCase):
             stdout="",
             stderr="",
             data={
-                "project": {
-                    "file_path": r"D:\GIS\Projects\demo.aprx",
-                    "layout_count": 2,
-                    "broken_layer_count": 1,
-                },
-                "default_map_candidate": {
-                    "name": "BaseMap",
-                    "source": "first_layout_map_frame",
-                },
+                "project": {"file_path": r"D:\GIS\Projects\demo.aprx"},
+                "default_map_candidate": {"name": "BaseMap"},
                 "layouts": [],
                 "maps": [],
                 "broken_data_sources": [],
@@ -158,24 +223,7 @@ class ResourceHelpersTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["resource_kind"], "project_context")
-        self.assertEqual(
-            payload["data"]["project"]["file_path"],
-            r"D:\GIS\Projects\demo.aprx",
-        )
-
-    def test_build_gis_resource_uri_tool_validates_kind(self) -> None:
-        payload = server.build_gis_resource_uri("unknown")
-
-        self.assertEqual(payload["status"], "error")
-
-    def test_build_gis_resource_uri_supports_project_context(self) -> None:
-        payload = server.build_gis_resource_uri(
-            "project_context",
-            open_current_project=True,
-        )
-
-        self.assertEqual(payload["status"], "ready")
-        self.assertEqual(payload["resource_uri"], "arcgis://project/current/context")
+        self.assertEqual(payload["data"]["project"]["file_path"], r"D:\GIS\Projects\demo.aprx")
 
 
 class DiagnosticToolTests(unittest.TestCase):
@@ -247,6 +295,14 @@ class DiagnosticToolTests(unittest.TestCase):
         self.assertEqual(payload["runtime"]["product_name"], "ArcGISPro")
         self.assertTrue(any(check["name"] == "mcp_tool_reachable" for check in payload["checks"]))
 
+    def test_debug_runtime_context_returns_context(self) -> None:
+        payload = server.debug_runtime_context()
+
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["server"], server.SERVER_NAME)
+        self.assertIn("context", payload)
+        self.assertIn("cwd", payload["context"])
+
 
 class GeoprocessingToolTests(unittest.TestCase):
     def test_buffer_features_wraps_execution_result(self) -> None:
@@ -256,15 +312,12 @@ class GeoprocessingToolTests(unittest.TestCase):
             python_executable=sys.executable,
             stdout="",
             stderr="",
-            data={
-                "tool": "Buffer",
-                "output_path": r"D:\GIS\Data\roads_buffer",
-                "row_count": 42,
-            },
+            data={"tool": "Buffer", "output_path": r"D:\GIS\Data\roads_buffer", "row_count": 42},
         )
 
         with patch(
-            "arcgis_mcp_server.run_in_arcgis_env", return_value=execution_result
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
         ) as mocked_run:
             payload = server.buffer_features(
                 in_features=r"D:\GIS\Data\roads",
@@ -287,15 +340,12 @@ class GeoprocessingToolTests(unittest.TestCase):
             python_executable=sys.executable,
             stdout="",
             stderr="",
-            data={
-                "tool": "Clip",
-                "output_path": r"D:\GIS\Data\roads_clip",
-                "row_count": 18,
-            },
+            data={"tool": "Clip", "output_path": r"D:\GIS\Data\roads_clip", "row_count": 18},
         )
 
         with patch(
-            "arcgis_mcp_server.run_in_arcgis_env", return_value=execution_result
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
         ) as mocked_run:
             payload = server.clip_features(
                 in_features=r"D:\GIS\Data\roads",

@@ -7,7 +7,6 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from textwrap import dedent
@@ -15,6 +14,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from arcgis_runtime_utils import (
+    build_arcgis_subprocess_env,
+    build_tool_payload,
+    collect_runtime_context,
+    path_exists,
+    timestamp_utc_iso,
+)
 from arcgis_script_templates import (
     build_arcpy_runtime_check_code,
     build_buffer_features_code,
@@ -380,8 +386,12 @@ def run_in_arcgis_env(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                stdin=subprocess.DEVNULL,
+                cwd=str(temp_path),
+                env=build_arcgis_subprocess_env(),
                 timeout=timeout_seconds,
                 check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired as exc:
             return ArcPyExecutionResult(
@@ -467,32 +477,6 @@ def _build_resource_payload(
     return payload
 
 
-def _build_tool_payload(
-    result: ArcPyExecutionResult,
-    *,
-    tool_name: str,
-    message: str | None = None,
-    inputs: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload = {
-        "tool": tool_name,
-        "status": result.status,
-        "data": _coerce_result_data(result),
-        "execution": _result_to_dict(result),
-    }
-    if inputs is not None:
-        payload["inputs"] = inputs
-    if message:
-        payload["message"] = message
-    elif result.error:
-        payload["message"] = result.error.get("message")
-    return payload
-
-
-def _timestamp_utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _run_arcpy_runtime_check(
     *,
     timeout_seconds: int = 60,
@@ -502,10 +486,6 @@ def _run_arcpy_runtime_check(
         timeout_seconds=timeout_seconds,
         require_arcpy=True,
     )
-
-
-def _check_exists(path: str | None) -> bool:
-    return bool(path) and Path(path).exists()
 
 
 def _read_project_layers(
@@ -590,7 +570,7 @@ def _build_doctor_report(timeout_seconds: int = 60) -> dict[str, Any]:
                     "details": runtime_payload,
                 }
             )
-            if not _check_exists(runtime_result.python_executable):
+            if not path_exists(runtime_result.python_executable):
                 overall_status = "warning"
                 checks.append(
                     {
@@ -632,7 +612,7 @@ def _build_doctor_report(timeout_seconds: int = 60) -> dict[str, Any]:
     return {
         "status": overall_status,
         "server": SERVER_NAME,
-        "timestamp_utc": _timestamp_utc_iso(),
+        "timestamp_utc": timestamp_utc_iso(),
         "arcgis_python": asdict(python_info) if python_info is not None else None,
         "runtime": runtime_payload,
         "checks": checks,
@@ -852,7 +832,7 @@ def ping() -> dict[str, Any]:
     return {
         "status": "ok",
         "server": SERVER_NAME,
-        "timestamp_utc": _timestamp_utc_iso(),
+        "timestamp_utc": timestamp_utc_iso(),
         "message": "如果你看到这条结果，说明这次请求已经真正进入 MCP Tool 调用链路。",
     }
 
@@ -863,7 +843,7 @@ def health_check(timeout_seconds: int = 30) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ready",
         "server": SERVER_NAME,
-        "timestamp_utc": _timestamp_utc_iso(),
+        "timestamp_utc": timestamp_utc_iso(),
         "mcp": {
             "status": "ok",
             "message": "health_check 已被实际调用，客户端当前正在使用 MCP Tool。",
@@ -911,6 +891,17 @@ def health_check(timeout_seconds: int = 30) -> dict[str, Any]:
 def doctor(timeout_seconds: int = 60) -> dict[str, Any]:
     """返回面向 GISer 的完整环境诊断报告。"""
     return _build_doctor_report(timeout_seconds=timeout_seconds)
+
+
+@mcp.tool()
+def debug_runtime_context() -> dict[str, Any]:
+    """返回当前 MCP 进程的运行上下文，用于排查 Trae 或沙箱环境差异。"""
+    return {
+        "status": "ready",
+        "server": SERVER_NAME,
+        "timestamp_utc": timestamp_utc_iso(),
+        "context": collect_runtime_context(),
+    }
 
 
 @mcp.tool()
@@ -972,9 +963,11 @@ def buffer_features(
             "message": str(exc),
         }
 
-    return _build_tool_payload(
+    return build_tool_payload(
         result,
         tool_name="buffer_features",
+        result_to_dict=_result_to_dict,
+        coerce_result_data=_coerce_result_data,
         message="Buffer 执行完成。" if result.status == "success" else None,
         inputs={
             "in_features": in_features,
@@ -1018,9 +1011,11 @@ def clip_features(
             "message": str(exc),
         }
 
-    return _build_tool_payload(
+    return build_tool_payload(
         result,
         tool_name="clip_features",
+        result_to_dict=_result_to_dict,
+        coerce_result_data=_coerce_result_data,
         message="Clip 执行完成。" if result.status == "success" else None,
         inputs={
             "in_features": in_features,
