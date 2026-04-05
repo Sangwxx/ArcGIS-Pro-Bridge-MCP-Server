@@ -130,9 +130,11 @@ README 或 `examples/` 目录里提供的 JSON 配置，不是复制到 PowerShe
 
 建议先让它只调用：
 
-- `detect_arcgis_environment`
+- `ping`
+- `health_check`
+- `doctor`
 
-确认 ArcGIS Pro 已被正确发现后，再继续读取工程和 GDB。
+确认 MCP 调用链路和 ArcPy 运行时都正常后，再继续读取工程、GDB 或执行地理处理。
 
 ## 如何接入 Trae
 
@@ -197,11 +199,11 @@ Claude Desktop 一般也是通过 MCP 配置文件接入。
 
 推荐顺序：
 
-1. 先检测 ArcGIS 环境
-2. 再读取当前工程图层
-3. 再读取指定 GDB
-4. 再读取指定 `.aprx` 工程概览
-5. 最后再让 AI 生成或执行 ArcPy
+1. 先调用 `ping`，确认这次请求真的走到了 MCP Tool
+2. 再调用 `health_check` 或 `doctor`，确认 ArcGIS Pro Python 和 ArcPy 运行时
+3. 再读取当前工程图层
+4. 再读取指定 GDB 或 `.aprx` 工程概览
+5. 最后再执行 `buffer_features`、`clip_features` 或通用 `execute_arcpy_code`
 
 更多可直接复制的中文提示词见：
 
@@ -215,7 +217,7 @@ Claude Desktop 一般也是通过 MCP 配置文件接入。
 
 通常会出现这些特征：
 
-- 直接返回 `detect_arcgis_environment`、`inspect_gdb`、`inspect_project_context` 等结果
+- 直接返回 `ping`、`health_check`、`doctor`、`inspect_gdb`、`inspect_project_context` 等结果
 - 结果内容明显是 ArcGIS 结构化信息
 - 不会自己去写测试脚本
 - 不会要求你手动长期开着一个 server 窗口读 stdout
@@ -235,7 +237,7 @@ Claude Desktop 一般也是通过 MCP 配置文件接入。
 
 如果你怀疑 Trae 没真正走 MCP，可以直接复制这段话给它：
 
-“不要使用 shell，不要写任何测试脚本，不要手动启动任何 server。只允许使用已经配置好的 MCP 工具。请直接调用 `detect_arcgis_environment`，并把返回结果完整告诉我。如果你没有实际调用 MCP 工具，请明确说明。” 
+“不要使用 shell，不要写任何测试脚本，不要手动启动任何 server。只允许使用已经配置好的 MCP 工具。请先调用 `ping`，再调用 `health_check`，并把返回结果完整告诉我。如果你没有实际调用 MCP 工具，请明确说明。” 
 
 这段提示词的作用，是强制它别绕去 shell 路线。
 
@@ -247,14 +249,20 @@ Claude Desktop 一般也是通过 MCP 配置文件接入。
 - 让 AI 检查哪些图层断开了数据源
 - 让 AI 读取某个 `.aprx` 工程的布局和地图框
 - 让 AI 读取某个 `.gdb` 的结构
+- 让 AI 直接执行常见的 Buffer 和 Clip 分析
 - 让 AI 先生成 ArcPy，再由你确认后执行
 
 ## 当前可用 Tool
 
 当前主要 Tool 包括：
 
+- `ping`
+- `health_check`
+- `doctor`
 - `detect_arcgis_environment`
 - `execute_arcpy_code`
+- `buffer_features`
+- `clip_features`
 - `build_gis_resource_uri`
 - `list_gis_layers`
 - `inspect_project_context`

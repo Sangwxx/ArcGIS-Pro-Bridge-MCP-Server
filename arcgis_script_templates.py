@@ -403,3 +403,98 @@ def build_project_context_code() -> str:
         )
         """
     ).strip()
+
+
+def build_arcpy_runtime_check_code() -> str:
+    return dedent(
+        """
+        install_info = arcpy.GetInstallInfo()
+        set_result(
+            {
+                "product_name": install_info.get("ProductName"),
+                "version": install_info.get("Version"),
+                "build_number": install_info.get("BuildNumber"),
+                "install_dir": install_info.get("InstallDir"),
+                "product_info": arcpy.ProductInfo(),
+                "scratch_gdb": getattr(arcpy.env, "scratchGDB", None),
+                "scratch_folder": getattr(arcpy.env, "scratchFolder", None),
+            }
+        )
+        """
+    ).strip()
+
+
+def build_buffer_features_code(
+    in_features: str,
+    out_feature_class: str,
+    buffer_distance_or_field: str,
+    dissolve_option: str,
+    dissolve_field: str | None,
+    method: str,
+) -> str:
+    return dedent(
+        f"""
+        result = arcpy.analysis.Buffer(
+            in_features={in_features!r},
+            out_feature_class={out_feature_class!r},
+            buffer_distance_or_field={buffer_distance_or_field!r},
+            dissolve_option={dissolve_option!r},
+            dissolve_field={dissolve_field!r},
+            method={method!r},
+        )
+
+        output_path = result.getOutput(0)
+        description = arcpy.Describe(output_path)
+        count_result = arcpy.management.GetCount(output_path)
+        set_result(
+            {{
+                "tool": "Buffer",
+                "output_path": output_path,
+                "row_count": int(count_result.getOutput(0)),
+                "shape_type": getattr(description, "shapeType", None),
+                "spatial_reference": {{
+                    "name": getattr(getattr(description, "spatialReference", None), "name", None),
+                    "factory_code": getattr(
+                        getattr(description, "spatialReference", None), "factoryCode", None
+                    ),
+                }},
+            }}
+        )
+        """
+    ).strip()
+
+
+def build_clip_features_code(
+    in_features: str,
+    clip_features: str,
+    out_feature_class: str,
+    cluster_tolerance: str | None,
+) -> str:
+    return dedent(
+        f"""
+        result = arcpy.analysis.Clip(
+            in_features={in_features!r},
+            clip_features={clip_features!r},
+            out_feature_class={out_feature_class!r},
+            cluster_tolerance={cluster_tolerance!r},
+        )
+
+        output_path = result.getOutput(0)
+        description = arcpy.Describe(output_path)
+        count_result = arcpy.management.GetCount(output_path)
+        set_result(
+            {{
+                "tool": "Clip",
+                "output_path": output_path,
+                "row_count": int(count_result.getOutput(0)),
+                "shape_type": getattr(description, "shapeType", None),
+                "spatial_reference": {{
+                    "name": getattr(getattr(description, "spatialReference", None), "name", None),
+                    "factory_code": getattr(
+                        getattr(description, "spatialReference", None), "factoryCode", None
+                    ),
+                }},
+            }}
+        )
+        """
+    ).strip()

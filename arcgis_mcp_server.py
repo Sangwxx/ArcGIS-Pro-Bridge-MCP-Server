@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from textwrap import dedent
@@ -15,6 +16,9 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from arcgis_script_templates import (
+    build_arcpy_runtime_check_code,
+    build_buffer_features_code,
+    build_clip_features_code,
     build_gdb_schema_code,
     build_project_context_code,
     build_project_layers_code,
@@ -463,6 +467,47 @@ def _build_resource_payload(
     return payload
 
 
+def _build_tool_payload(
+    result: ArcPyExecutionResult,
+    *,
+    tool_name: str,
+    message: str | None = None,
+    inputs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "tool": tool_name,
+        "status": result.status,
+        "data": _coerce_result_data(result),
+        "execution": _result_to_dict(result),
+    }
+    if inputs is not None:
+        payload["inputs"] = inputs
+    if message:
+        payload["message"] = message
+    elif result.error:
+        payload["message"] = result.error.get("message")
+    return payload
+
+
+def _timestamp_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _run_arcpy_runtime_check(
+    *,
+    timeout_seconds: int = 60,
+) -> ArcPyExecutionResult:
+    return run_in_arcgis_env(
+        build_arcpy_runtime_check_code(),
+        timeout_seconds=timeout_seconds,
+        require_arcpy=True,
+    )
+
+
+def _check_exists(path: str | None) -> bool:
+    return bool(path) and Path(path).exists()
+
+
 def _read_project_layers(
     *, project_path: str | None = None, open_current_project: bool = False
 ) -> ArcPyExecutionResult:
@@ -491,6 +536,108 @@ def _read_project_context(
         open_current_project=open_current_project,
         require_arcpy=True,
     )
+
+
+def _build_doctor_report(timeout_seconds: int = 60) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = [
+        {
+            "name": "mcp_tool_reachable",
+            "status": "pass",
+            "message": "doctor 工具已被实际调用，说明客户端已经进入 MCP Tool 调用链路。",
+        }
+    ]
+    recommendations: list[str] = []
+    overall_status = "ready"
+
+    try:
+        python_info = discover_arcgis_pro_python()
+        checks.append(
+            {
+                "name": "arcgis_python_discovery",
+                "status": "pass",
+                "message": "已找到 ArcGIS Pro Python。",
+                "details": asdict(python_info),
+            }
+        )
+    except ArcGISDiscoveryError as exc:
+        overall_status = "unavailable"
+        python_info = None
+        checks.append(
+            {
+                "name": "arcgis_python_discovery",
+                "status": "fail",
+                "message": str(exc),
+            }
+        )
+        recommendations.extend(
+            [
+                "请确认 ArcGIS Pro 已安装且能够正常启动。",
+                "如有需要，可手动设置 ARCGIS_PRO_PYTHON 或 ARCGIS_PRO_INSTALL_DIR。",
+                "如果是在 Trae 或 Cursor 中测试，请确认客户端真正调用了 MCP Tool，而不是 shell。",
+            ]
+        )
+
+    runtime_payload: dict[str, Any] | None = None
+    if python_info is not None:
+        runtime_result = _run_arcpy_runtime_check(timeout_seconds=timeout_seconds)
+        runtime_payload = _coerce_result_data(runtime_result)
+        if runtime_result.status == "success":
+            checks.append(
+                {
+                    "name": "arcpy_runtime_check",
+                    "status": "pass",
+                    "message": "ArcPy 运行时检查通过。",
+                    "details": runtime_payload,
+                }
+            )
+            if not _check_exists(runtime_result.python_executable):
+                overall_status = "warning"
+                checks.append(
+                    {
+                        "name": "python_path_exists",
+                        "status": "warn",
+                        "message": (
+                            "发现到的 Python 路径在当前文件系统中不可访问，请确认安装目录是否变更。"
+                        ),
+                        "details": {"python_executable": runtime_result.python_executable},
+                    }
+                )
+        else:
+            overall_status = "warning"
+            checks.append(
+                {
+                    "name": "arcpy_runtime_check",
+                    "status": "fail",
+                    "message": runtime_result.error.get("message")
+                    if runtime_result.error
+                    else "ArcPy 运行时检查失败。",
+                    "details": _result_to_dict(runtime_result),
+                }
+            )
+            recommendations.extend(
+                [
+                    "请先在 ArcGIS Pro 中确认许可状态和登录状态。",
+                    "如果是首次接入 AI 客户端，建议先只测试 detect_arcgis_environment 或 ping。",
+                ]
+            )
+
+    if overall_status == "ready":
+        recommendations.extend(
+            [
+                "下一步建议先调用 ping 或 health_check，确认客户端确实在走 MCP Tool。",
+                "然后再调用 inspect_gdb、inspect_project_context 或专用地理处理 Tool。",
+            ]
+        )
+
+    return {
+        "status": overall_status,
+        "server": SERVER_NAME,
+        "timestamp_utc": _timestamp_utc_iso(),
+        "arcgis_python": asdict(python_info) if python_info is not None else None,
+        "runtime": runtime_payload,
+        "checks": checks,
+        "recommendations": recommendations,
+    }
 
 
 @mcp.resource("arcgis://server/status")
@@ -700,6 +847,73 @@ def detect_arcgis_environment() -> dict[str, Any]:
 
 
 @mcp.tool()
+def ping() -> dict[str, Any]:
+    """返回一个最小可验证结果，用于确认客户端已真正调用 MCP Tool。"""
+    return {
+        "status": "ok",
+        "server": SERVER_NAME,
+        "timestamp_utc": _timestamp_utc_iso(),
+        "message": "如果你看到这条结果，说明这次请求已经真正进入 MCP Tool 调用链路。",
+    }
+
+
+@mcp.tool()
+def health_check(timeout_seconds: int = 30) -> dict[str, Any]:
+    """返回轻量级健康检查，帮助快速判断 MCP 与 ArcGIS 环境是否可用。"""
+    payload: dict[str, Any] = {
+        "status": "ready",
+        "server": SERVER_NAME,
+        "timestamp_utc": _timestamp_utc_iso(),
+        "mcp": {
+            "status": "ok",
+            "message": "health_check 已被实际调用，客户端当前正在使用 MCP Tool。",
+        },
+    }
+
+    try:
+        python_info = discover_arcgis_pro_python()
+        payload["arcgis_python"] = asdict(python_info)
+    except ArcGISDiscoveryError as exc:
+        payload["status"] = "unavailable"
+        payload["arcgis_python"] = None
+        payload["message"] = str(exc)
+        payload["next_step"] = (
+            "请先确认 ArcGIS Pro 已安装且可正常启动；如果是在 Trae 或 Cursor 中测试，"
+            "请明确要求客户端直接调用 MCP Tool，而不是写测试脚本或手动启动 server。"
+        )
+        return payload
+
+    runtime_result = _run_arcpy_runtime_check(timeout_seconds=timeout_seconds)
+    payload["runtime"] = _result_to_dict(runtime_result)
+    payload["runtime_data"] = _coerce_result_data(runtime_result)
+
+    if runtime_result.status != "success":
+        payload["status"] = "warning"
+        payload["message"] = (
+            runtime_result.error.get("message")
+            if runtime_result.error
+            else "ArcPy 运行时检查未通过。"
+        )
+        payload["next_step"] = (
+            "建议下一步调用 doctor 获取完整诊断，"
+            "重点检查许可状态、ArcPy 运行时和客户端是否真的走了 MCP。"
+        )
+        return payload
+
+    payload["message"] = "MCP 可达，ArcGIS Pro Python 已发现，ArcPy 运行时检查通过。"
+    payload["next_step"] = (
+        "可以继续调用 inspect_gdb、inspect_project_context、buffer_features 或 clip_features。"
+    )
+    return payload
+
+
+@mcp.tool()
+def doctor(timeout_seconds: int = 60) -> dict[str, Any]:
+    """返回面向 GISer 的完整环境诊断报告。"""
+    return _build_doctor_report(timeout_seconds=timeout_seconds)
+
+
+@mcp.tool()
 def execute_arcpy_code(
     code: str,
     workspace: str | None = None,
@@ -723,6 +937,100 @@ def execute_arcpy_code(
             "message": str(exc),
         }
     return _result_to_dict(result)
+
+
+@mcp.tool()
+def buffer_features(
+    in_features: str,
+    out_feature_class: str,
+    buffer_distance_or_field: str,
+    dissolve_option: str = "NONE",
+    dissolve_field: str | None = None,
+    method: str = "PLANAR",
+    workspace: str | None = None,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """执行常用 Buffer 分析，返回输出要素摘要和执行信息。"""
+    try:
+        result = run_in_arcgis_env(
+            build_buffer_features_code(
+                in_features=in_features,
+                out_feature_class=out_feature_class,
+                buffer_distance_or_field=buffer_distance_or_field,
+                dissolve_option=dissolve_option,
+                dissolve_field=dissolve_field,
+                method=method,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "buffer_features",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+
+    return _build_tool_payload(
+        result,
+        tool_name="buffer_features",
+        message="Buffer 执行完成。" if result.status == "success" else None,
+        inputs={
+            "in_features": in_features,
+            "out_feature_class": out_feature_class,
+            "buffer_distance_or_field": buffer_distance_or_field,
+            "dissolve_option": dissolve_option,
+            "dissolve_field": dissolve_field,
+            "method": method,
+            "workspace": workspace,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+
+
+@mcp.tool()
+def clip_features(
+    in_features: str,
+    clip_features_path: str,
+    out_feature_class: str,
+    cluster_tolerance: str | None = None,
+    workspace: str | None = None,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """执行常用 Clip 分析，返回输出要素摘要和执行信息。"""
+    try:
+        result = run_in_arcgis_env(
+            build_clip_features_code(
+                in_features=in_features,
+                clip_features=clip_features_path,
+                out_feature_class=out_feature_class,
+                cluster_tolerance=cluster_tolerance,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "clip_features",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+
+    return _build_tool_payload(
+        result,
+        tool_name="clip_features",
+        message="Clip 执行完成。" if result.status == "success" else None,
+        inputs={
+            "in_features": in_features,
+            "clip_features": clip_features_path,
+            "out_feature_class": out_feature_class,
+            "cluster_tolerance": cluster_tolerance,
+            "workspace": workspace,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
 
 
 @mcp.tool()
