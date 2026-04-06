@@ -24,3 +24,6 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+.tmp-shell/
+.tmp-tests/
+arcgis-mcp-*/

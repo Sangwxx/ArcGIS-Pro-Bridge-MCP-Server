@@ -28,6 +28,12 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = [
+  "arcgis-mcp-*",
+  ".tmp-shell",
+  ".tmp-tests",
+  ".uv-cache",
+]
 
 [tool.ruff.lint]
 select = [

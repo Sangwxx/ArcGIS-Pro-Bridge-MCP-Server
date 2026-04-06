@@ -3,13 +3,108 @@ from __future__ import annotations
 import json
 import os
 import sys
-import tempfile
 import unittest
+import zipfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
+from uuid import uuid4
 
 import arcgis_mcp_server as server
-from arcgis_runtime_utils import build_arcgis_subprocess_env
+from arcgis_runtime_utils import build_arcgis_subprocess_env, remove_tree
+
+TEST_TEMP_ROOT = Path.cwd() / ".tmp-tests"
+TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+os.environ["ARCGIS_MCP_TEMP_DIR"] = str(TEST_TEMP_ROOT)
+
+
+def make_test_dir(prefix: str) -> Path:
+    path = TEST_TEMP_ROOT / f"{prefix}{uuid4().hex[:8]}"
+    path.mkdir(parents=True, exist_ok=False)
+    return path
+
+
+def create_sample_aprx(path: Path) -> None:
+    files = {
+        "GISProject.json": {
+            "type": "CIMGISProject",
+            "defaultGeoDatabase": r".\Demo.gdb",
+            "defaultToolbox": r".\toolbox.atbx",
+            "defaultFolder": r"D:\GIS\Workspace",
+        },
+        "Index.json": {
+            "DocumentType": "Index",
+            "NumberOfNodes": 3,
+            "Nodes": [
+                {
+                    "NodeId": 1,
+                    "NodeType": "Map",
+                    "FileName": "maps/main.json",
+                    "ChildNodeIds": "2",
+                },
+                {
+                    "NodeId": 2,
+                    "NodeType": "Layer",
+                    "FileName": "layers/roads.json",
+                    "ChildNodeIds": "",
+                },
+                {
+                    "NodeId": 3,
+                    "NodeType": "Layout",
+                    "FileName": "layouts/layout.json",
+                    "ChildNodeIds": "",
+                },
+            ],
+        },
+        "maps/main.json": {
+            "type": "CIMMap",
+            "name": "主地图",
+            "uRI": "CIMPATH=maps/main.json",
+            "mapType": "Map",
+            "spatialReference": {"wkid": 4490, "latestWkid": 4490},
+            "layers": ["CIMPATH=layers/roads.json"],
+        },
+        "layers/roads.json": {
+            "type": "CIMFeatureLayer",
+            "name": "道路",
+            "visibility": True,
+            "featureTable": {
+                "dataConnection": {
+                    "type": "CIMStandardDataConnection",
+                    "workspaceConnectionString": r"DATABASE=.\Demo.gdb",
+                    "workspaceFactory": "FileGDB",
+                    "dataset": "道路",
+                    "datasetType": "esriDTFeatureClass",
+                },
+                "fieldDescriptions": [
+                    {
+                        "fieldName": "道路.NAME",
+                        "alias": "名称",
+                        "visible": True,
+                        "readOnly": False,
+                    }
+                ],
+            },
+        },
+        "layouts/layout.json": {
+            "type": "CIMLayout",
+            "name": "布局1",
+            "page": {"width": 297, "height": 210, "units": {"uwkid": 1025}},
+            "elements": [
+                {
+                    "type": "CIMMapFrame",
+                    "name": "地图框",
+                    "uRI": "CIMPATH=maps/main.json",
+                    "view": {
+                        "viewableObjectPath": "CIMPATH=maps/main.json",
+                        "camera": {"scale": 50000, "heading": 0},
+                    },
+                }
+            ],
+        },
+    }
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, payload in files.items():
+            zf.writestr(name, json.dumps(payload, ensure_ascii=False))
 
 
 class DiscoverArcGISPythonTests(unittest.TestCase):
@@ -17,26 +112,27 @@ class DiscoverArcGISPythonTests(unittest.TestCase):
         server.clear_discovery_cache()
 
     def test_prefers_explicit_python_environment_variable(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fake_python = Path(temp_dir) / "python.exe"
-            fake_python.write_text("", encoding="utf-8")
+        temp_dir = make_test_dir("discover-")
+        self.addCleanup(remove_tree, temp_dir)
+        fake_python = temp_dir / "python.exe"
+        fake_python.write_text("", encoding="utf-8")
 
-            with patch.dict(os.environ, {"ARCGIS_PRO_PYTHON": str(fake_python)}, clear=True):
-                info = server.discover_arcgis_pro_python()
+        with patch.dict(os.environ, {"ARCGIS_PRO_PYTHON": str(fake_python)}, clear=True):
+            info = server.discover_arcgis_pro_python()
 
         self.assertEqual(info.python_executable, str(fake_python.resolve()))
         self.assertEqual(info.source, "env:ARCGIS_PRO_PYTHON")
 
     def test_uses_install_dir_environment_variable(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            install_dir = Path(temp_dir)
-            python_dir = install_dir / "bin" / "Python" / "envs" / "arcgispro-py3"
-            python_dir.mkdir(parents=True)
-            fake_python = python_dir / "python.exe"
-            fake_python.write_text("", encoding="utf-8")
+        install_dir = make_test_dir("discover-")
+        self.addCleanup(remove_tree, install_dir)
+        python_dir = install_dir / "bin" / "Python" / "envs" / "arcgispro-py3"
+        python_dir.mkdir(parents=True)
+        fake_python = python_dir / "python.exe"
+        fake_python.write_text("", encoding="utf-8")
 
-            with patch.dict(os.environ, {"ARCGIS_PRO_INSTALL_DIR": str(install_dir)}, clear=True):
-                info = server.discover_arcgis_pro_python()
+        with patch.dict(os.environ, {"ARCGIS_PRO_INSTALL_DIR": str(install_dir)}, clear=True):
+            info = server.discover_arcgis_pro_python()
 
         self.assertEqual(info.python_executable, str(fake_python.resolve()))
         self.assertEqual(info.install_dir, str(install_dir.resolve()))
@@ -45,6 +141,8 @@ class DiscoverArcGISPythonTests(unittest.TestCase):
 
 class RuntimeIsolationTests(unittest.TestCase):
     def test_build_arcgis_subprocess_env_strips_parent_python_and_trae_variables(self) -> None:
+        local_appdata_root = TEST_TEMP_ROOT / "localappdata-env"
+        self.addCleanup(remove_tree, local_appdata_root)
         payload = build_arcgis_subprocess_env(
             {
                 "PATH": r"C:\Windows\System32",
@@ -52,7 +150,8 @@ class RuntimeIsolationTests(unittest.TestCase):
                 "VIRTUAL_ENV": "venv",
                 "UV_PROJECT_ENVIRONMENT": ".venv",
                 "TRAE_SANDBOX": "1",
-            }
+            },
+            local_appdata_root=local_appdata_root,
         )
 
         self.assertEqual(payload["PATH"], r"C:\Windows\System32")
@@ -62,6 +161,8 @@ class RuntimeIsolationTests(unittest.TestCase):
         self.assertNotIn("TRAE_SANDBOX", payload)
         self.assertEqual(payload["PYTHONUTF8"], "1")
         self.assertEqual(payload["ARCGIS_MCP_SUBPROCESS"], "1")
+        self.assertEqual(payload["LOCALAPPDATA"], str(local_appdata_root.resolve()))
+        self.assertTrue((local_appdata_root / "ESRI" / "ArcGISPro" / "Toolboxes").exists())
 
     def test_run_in_arcgis_env_uses_isolated_subprocess_settings(self) -> None:
         completed = type(
@@ -70,18 +171,12 @@ class RuntimeIsolationTests(unittest.TestCase):
             {"returncode": 0, "stdout": "", "stderr": ""},
         )()
 
-        temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(temp_dir.cleanup)
-        temp_dir_context = Mock()
-        temp_dir_context.__enter__ = Mock(return_value=temp_dir.name)
-        temp_dir_context.__exit__ = Mock(return_value=False)
+        temp_dir = make_test_dir("runtime-")
+        self.addCleanup(remove_tree, temp_dir)
 
-        with patch("arcgis_mcp_server.subprocess.run", return_value=completed) as mocked_run:
-            with patch(
-                "arcgis_mcp_server.tempfile.TemporaryDirectory",
-                return_value=temp_dir_context,
-            ):
-                result_path = Path(temp_dir.name) / server.RESULT_FILENAME
+        with patch("arcgis_mcp_server.create_temp_workspace", return_value=temp_dir):
+            with patch("arcgis_mcp_server.subprocess.run", return_value=completed) as mocked_run:
+                result_path = temp_dir / server.RESULT_FILENAME
                 result_path.write_text(
                     json.dumps(
                         {
@@ -110,8 +205,13 @@ class RuntimeIsolationTests(unittest.TestCase):
         kwargs = mocked_run.call_args.kwargs
         self.assertEqual(kwargs["stdin"], server.subprocess.DEVNULL)
         self.assertEqual(kwargs["env"]["ARCGIS_MCP_SUBPROCESS"], "1")
-        self.assertEqual(kwargs["cwd"], temp_dir.name)
+        self.assertEqual(kwargs["cwd"], str(temp_dir))
+        self.assertEqual(
+            kwargs["env"]["LOCALAPPDATA"],
+            str((temp_dir / "localappdata").resolve()),
+        )
         self.assertEqual(kwargs["creationflags"], getattr(server.subprocess, "CREATE_NO_WINDOW", 0))
+        self.assertEqual(temp_dir.parent, TEST_TEMP_ROOT)
 
 
 class RunInArcGISEnvTests(unittest.TestCase):
@@ -158,7 +258,7 @@ class ResourceHelpersTests(unittest.TestCase):
         project_ref = resource_uri.split("/")[3]
 
         self.assertEqual(
-            server._decode_resource_path(project_ref),
+            server.decode_resource_path(project_ref),
             str(Path(project_path).resolve()),
         )
 
@@ -168,7 +268,7 @@ class ResourceHelpersTests(unittest.TestCase):
         project_ref = resource_uri.split("/")[3]
 
         self.assertEqual(
-            server._decode_resource_path(project_ref),
+            server.decode_resource_path(project_ref),
             str(Path(project_path).resolve()),
         )
 
@@ -224,6 +324,43 @@ class ResourceHelpersTests(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["resource_kind"], "project_context")
         self.assertEqual(payload["data"]["project"]["file_path"], r"D:\GIS\Projects\demo.aprx")
+
+    def test_inspect_project_context_uses_aprx_archive_fast_path(self) -> None:
+        temp_dir = make_test_dir("aprx-")
+        self.addCleanup(remove_tree, temp_dir)
+        aprx_path = temp_dir / "demo.aprx"
+        create_sample_aprx(aprx_path)
+
+        payload = server.inspect_project_context(
+            project_path=str(aprx_path),
+            timeout_seconds=10,
+            include_source_details=False,
+        )
+
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["data"]["read_mode"], "aprx_archive")
+        self.assertEqual(payload["data"]["project"]["map_count"], 1)
+        self.assertEqual(payload["data"]["default_map_candidate"]["name"], "主地图")
+
+    def test_list_gis_layers_uses_aprx_archive_fast_path(self) -> None:
+        temp_dir = make_test_dir("aprx-")
+        self.addCleanup(remove_tree, temp_dir)
+        aprx_path = temp_dir / "demo.aprx"
+        create_sample_aprx(aprx_path)
+
+        payload = server.list_gis_layers(
+            project_path=str(aprx_path),
+            timeout_seconds=10,
+            include_fields=True,
+            include_data_source_details=True,
+        )
+
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["data"]["read_mode"], "aprx_archive")
+        layer = payload["data"]["maps"][0]["layers"][0]
+        self.assertEqual(layer["name"], "道路")
+        self.assertEqual(layer["fields"][0]["alias"], "名称")
+        self.assertEqual(layer["source_status"]["workspace_factory"], "FileGDB")
 
 
 class DiagnosticToolTests(unittest.TestCase):
@@ -302,6 +439,111 @@ class DiagnosticToolTests(unittest.TestCase):
         self.assertEqual(payload["server"], server.SERVER_NAME)
         self.assertIn("context", payload)
         self.assertIn("cwd", payload["context"])
+
+
+class ProjectContextToolTests(unittest.TestCase):
+    def test_inspect_project_context_uses_lightweight_mode_by_default(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"project": {"file_path": r"D:\GIS\Projects\demo.aprx"}},
+        )
+
+        with patch(
+            "arcgis_mcp_server._read_project_context", return_value=execution_result
+        ) as mocked_read:
+            payload = server.inspect_project_context(project_path=r"D:\GIS\Projects\demo.aprx")
+
+        mocked_read.assert_called_once_with(
+            project_path=r"D:\GIS\Projects\demo.aprx",
+            open_current_project=False,
+            timeout_seconds=server.DEFAULT_TIMEOUT_SECONDS,
+            include_source_details=False,
+        )
+        self.assertEqual(payload["status"], "success")
+
+    def test_inspect_project_context_supports_explicit_detail_and_timeout(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"project": {"file_path": r"D:\GIS\Projects\demo.aprx"}},
+        )
+
+        with patch(
+            "arcgis_mcp_server._read_project_context", return_value=execution_result
+        ) as mocked_read:
+            server.inspect_project_context(
+                project_path=r"D:\GIS\Projects\demo.aprx",
+                timeout_seconds=180,
+                include_source_details=True,
+            )
+
+        mocked_read.assert_called_once_with(
+            project_path=r"D:\GIS\Projects\demo.aprx",
+            open_current_project=False,
+            timeout_seconds=180,
+            include_source_details=True,
+        )
+
+
+class ProjectLayersToolTests(unittest.TestCase):
+    def test_list_gis_layers_uses_lightweight_mode_by_default(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"maps": []},
+        )
+
+        with patch(
+            "arcgis_mcp_server._read_project_layers", return_value=execution_result
+        ) as mocked_read:
+            payload = server.list_gis_layers(project_path=r"D:\GIS\Projects\demo.aprx")
+
+        mocked_read.assert_called_once_with(
+            project_path=r"D:\GIS\Projects\demo.aprx",
+            open_current_project=False,
+            timeout_seconds=server.DEFAULT_TIMEOUT_SECONDS,
+            include_fields=False,
+            include_data_source_details=False,
+        )
+        self.assertEqual(payload["status"], "success")
+
+    def test_list_gis_layers_supports_explicit_detail_flags(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"maps": []},
+        )
+
+        with patch(
+            "arcgis_mcp_server._read_project_layers", return_value=execution_result
+        ) as mocked_read:
+            server.list_gis_layers(
+                project_path=r"D:\GIS\Projects\demo.aprx",
+                timeout_seconds=180,
+                include_fields=True,
+                include_data_source_details=True,
+            )
+
+        mocked_read.assert_called_once_with(
+            project_path=r"D:\GIS\Projects\demo.aprx",
+            open_current_project=False,
+            timeout_seconds=180,
+            include_fields=True,
+            include_data_source_details=True,
+        )
 
 
 class GeoprocessingToolTests(unittest.TestCase):
