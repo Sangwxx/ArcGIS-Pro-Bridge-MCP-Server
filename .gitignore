@@ -1,7 +1,7 @@
 # AI 代理与本地治理文档
 .agentdocs/
 CLAUDE.md
-AGENTS.md
+# AGENTS.md - Unignored for OpenCode integration
 
 # Python 虚拟环境与缓存
 .venv/
