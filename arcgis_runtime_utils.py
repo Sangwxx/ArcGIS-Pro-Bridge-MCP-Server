@@ -95,6 +95,44 @@ def path_exists(path: str | None) -> bool:
     return bool(path) and Path(path).exists()
 
 
+def validate_path(path: str | os.PathLike[str]) -> Path:
+    """Validate a path against allowed directories.
+
+    If ARCGIS_MCP_ALLOWED_PATHS is set, the path must be within one of
+    the colon-separated allowed directories. If not set, all paths are
+    permitted (permissive default).
+
+    Args:
+        path: Path to validate
+
+    Returns:
+        Resolved Path if valid
+
+    Raises:
+        ValueError: If path is outside allowed directories
+    """
+    resolved = Path(path).expanduser().resolve()
+
+    allowed_paths_str = os.environ.get("ARCGIS_MCP_ALLOWED_PATHS", "")
+    if not allowed_paths_str:
+        return resolved
+
+    allowed_dirs = [Path(p).resolve() for p in allowed_paths_str.split(":") if p]
+
+    for allowed_dir in allowed_dirs:
+        try:
+            resolved.relative_to(allowed_dir)
+            return resolved
+        except ValueError:
+            continue
+
+    raise ValueError(
+        f"Path '{path}' is not within allowed directories. "
+        f"Set ARCGIS_MCP_ALLOWED_PATHS to permit specific directories. "
+        f"Current allowed paths: {allowed_dirs}"
+    )
+
+
 def build_arcgis_subprocess_env(
     base_env: Mapping[str, str] | None = None,
     *,
