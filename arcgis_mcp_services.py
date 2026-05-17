@@ -86,7 +86,7 @@ def build_doctor_report(
         {
             "name": "mcp_tool_reachable",
             "status": "pass",
-            "message": "doctor 工具已被实际调用，说明客户端已经进入 MCP Tool 调用链路。",
+            "message": "doctor tool has been called, client has entered MCP Tool call chain.",
         }
     ]
     recommendations: list[str] = []
@@ -98,7 +98,7 @@ def build_doctor_report(
             {
                 "name": "arcgis_python_discovery",
                 "status": "pass",
-                "message": "已找到 ArcGIS Pro Python。",
+                "message": "ArcGIS Pro Python found.",
                 "details": asdict(python_info),
             }
         )
@@ -114,9 +114,10 @@ def build_doctor_report(
         )
         recommendations.extend(
             [
-                "请确认 ArcGIS Pro 已安装且能够正常启动。",
-                "如有需要，可手动设置 ARCGIS_PRO_PYTHON 或 ARCGIS_PRO_INSTALL_DIR。",
-                "如果是在 Trae 或 Cursor 中测试，请确认客户端真正调用了 MCP Tool，而不是 shell。",
+                "Confirm ArcGIS Pro is installed and can start.",
+                "If needed, manually set ARCGIS_PRO_PYTHON or ARCGIS_PRO_INSTALL_DIR.",
+                "If testing in Trae or Cursor, confirm the client is "
+                "actually calling the MCP Tool, not shell.",
             ]
         )
 
@@ -129,7 +130,7 @@ def build_doctor_report(
                 {
                     "name": "arcpy_runtime_check",
                     "status": "pass",
-                    "message": "ArcPy 运行时检查通过。",
+                    "message": "ArcPy runtime check passed.",
                     "details": runtime_payload,
                 }
             )
@@ -140,7 +141,9 @@ def build_doctor_report(
                         "name": "python_path_exists",
                         "status": "warn",
                         "message": (
-                            "发现到的 Python 路径在当前文件系统中不可访问，请确认安装目录是否变更。"
+                            "Discovered Python path is not accessible in "
+                            "the current filesystem, confirm if the install "
+                            "directory has changed."
                         ),
                         "details": {"python_executable": runtime_result.python_executable},
                     }
@@ -153,22 +156,24 @@ def build_doctor_report(
                     "status": "fail",
                     "message": runtime_result.error.get("message")
                     if runtime_result.error
-                    else "ArcPy 运行时检查失败。",
+                    else "ArcPy runtime check failed.",
                     "details": result_to_dict(runtime_result),
                 }
             )
             recommendations.extend(
                 [
-                    "请先在 ArcGIS Pro 中确认许可状态和登录状态。",
-                    "如果是首次接入 AI 客户端，建议先只测试 detect_arcgis_environment 或 ping。",
+                    "First confirm license status and login status in ArcGIS Pro.",
+                    "If this is the first time connecting to an AI "
+                    "client, start by testing detect_arcgis_environment "
+                    "or ping.",
                 ]
             )
 
     if overall_status == "ready":
         recommendations.extend(
             [
-                "下一步建议先调用 ping 或 health_check，确认客户端确实在走 MCP Tool。",
-                "然后再调用 inspect_gdb、inspect_project_context 或专用地理处理 Tool。",
+                "Next step: call ping or health_check to confirm the client is actually using MCP.",
+                "Then call inspect_gdb, inspect_project_context, or dedicated geoprocessing tools.",
             ]
         )
 

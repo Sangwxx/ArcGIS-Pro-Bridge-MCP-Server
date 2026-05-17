@@ -1,60 +1,60 @@
-# 提示词示例
+# Prompt Examples
 
-下面这些句子可以直接发给支持 MCP 的 AI 客户端使用。
+The following prompts can be sent directly to an AI client that supports MCP.
 
-如果你是第一次接触这种工作流，建议先从“读取信息”开始，再逐步让 AI 执行 ArcPy。
+If this is your first time using this workflow, start by reading information, then gradually have the AI execute ArcPy.
 
-## 1. 先检查环境
+## 1. Check the Environment First
 
-请先检查 ArcGIS Pro 环境是否已经被正确发现，并告诉我当前使用的是哪个 Python 路径。
+Please check whether the ArcGIS Pro environment has been correctly discovered, and tell me which Python path is currently in use.
 
-## 2. 读取当前工程中的图层
+## 2. Read Layers in the Current Project
 
-请读取当前 ArcGIS Pro 工程中的地图和图层，并告诉我：
-- 有哪些地图
-- 每个地图里有哪些图层
-- 哪些图层的数据源已经断开
+Please read the maps and layers in the current ArcGIS Pro project, and tell me:
+- What maps exist
+- What layers are in each map
+- Which layers have broken data sources
 
-## 3. 读取指定 GDB 的结构
+## 3. Read a Specific GDB Schema
 
-请检查这个 GDB 的结构：`C:\GIS\Data\CityData.gdb`
+Please inspect the structure of this GDB: `C:\GIS\Data\CityData.gdb`
 
-告诉我：
-- 有哪些要素类
-- 每个要素类有哪些字段
-- 使用的空间参考是什么
+Tell me:
+- What feature classes exist
+- What fields are in each feature class
+- What spatial reference is used
 
-## 4. 读取指定工程概览
+## 4. Read a Specific Project Overview
 
-请读取这个 `.aprx` 工程：`C:\GIS\Projects\City.aprx`
+Please read this `.aprx` project: `C:\GIS\Projects\City.aprx`
 
-告诉我：
-- 有哪些地图
-- 有哪些布局
-- 每个布局里有哪些地图框
-- 默认地图候选是什么
-- 是否有失效的数据源
+Tell me:
+- What maps exist
+- What layouts exist
+- What map frames are in each layout
+- What the default map candidate is
+- Whether there are any broken data sources
 
-## 5. 先生成 ArcPy，再执行
+## 5. Generate ArcPy First, Then Execute
 
-请基于当前工程中的 `roads` 图层，生成一段 ArcPy Buffer 代码，缓冲距离为 50 米，输出到默认 GDB。
+Based on the `roads` layer in the current project, generate ArcPy Buffer code with a 50-meter buffer distance, output to the default GDB.
 
-先不要执行，先把代码给我确认。
+Do not execute yet -- show me the code for confirmation first.
 
-## 6. 直接执行 Buffer
+## 6. Execute Buffer Directly
 
-请执行 ArcPy Buffer：
-- 输入图层：`C:\GIS\Data\roads.shp`
-- 输出图层：`C:\GIS\Data\roads_buffer_50m.shp`
-- 距离：`50 Meters`
+Please execute an ArcPy Buffer:
+- Input layer: `C:\GIS\Data\roads.shp`
+- Output layer: `C:\GIS\Data\roads_buffer_50m.shp`
+- Distance: `50 Meters`
 
-执行后告诉我：
-- 是否成功
-- stdout 是什么
-- stderr 是什么
+After execution, tell me:
+- Whether it succeeded
+- What stdout contains
+- What stderr contains
 
-## 7. 检查布局里的地图框
+## 7. Check Map Frames in Layouts
 
-请读取这个工程的布局和地图框：`C:\GIS\Projects\Report.aprx`
+Please read the layouts and map frames in this project: `C:\GIS\Projects\Report.aprx`
 
-告诉我每个地图框绑定的是哪个地图。
+Tell me which map each map frame is bound to.

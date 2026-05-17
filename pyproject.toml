@@ -1,7 +1,7 @@
 [project]
 name = "arcgis-pro-bridge-mcp"
 version = "0.1.0"
-description = "通过 MCP 桥接 AI Agent 与本地 ArcGIS Pro 的 Python 服务端。"
+description = "Python MCP server bridging AI agents with local ArcGIS Pro."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -24,6 +24,9 @@ arcgis-mcp-server = "arcgis_mcp_server:main"
 dev = [
   "ruff>=0.11.2",
 ]
+
+[tool.setuptools]
+py-modules = ["arcgis_aprx_archive", "arcgis_mcp_resources", "arcgis_mcp_server", "arcgis_mcp_services", "arcgis_runtime_utils", "arcgis_script_templates"]
 
 [tool.ruff]
 line-length = 100

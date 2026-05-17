@@ -38,6 +38,9 @@ if exist "C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" 
 )
 echo.
 
+REM Change to project root directory (where pyproject.toml and arcgis_mcp_server.py live)
+pushd "%~dp0.."
+
 REM Install dependencies
 echo [4/5] Installing dependencies...
 if exist "uv.lock" (
@@ -57,4 +60,8 @@ echo.
 echo ========================================
 echo Setup test complete
 echo ========================================
+
+REM Return to original directory
+popd
+
 pause

@@ -46,6 +46,7 @@ from arcgis_runtime_utils import (
     remove_tree,
     resolve_temp_root,
     timestamp_utc_iso,
+    validate_path,
 )
 from arcgis_script_templates import (
     build_arcpy_runtime_check_code,
@@ -58,7 +59,7 @@ from arcgis_script_templates import (
 
 try:
     import winreg
-except ImportError:  # pragma: no cover - 仅在非 Windows 环境触发
+except ImportError:  # pragma: no cover - only triggered on non-Windows
     winreg = None
 
 
@@ -79,15 +80,46 @@ RESULT_FILENAME = "result.json"
 mcp = FastMCP(
     name=SERVER_NAME,
     instructions=(
-        "用于桥接 AI Agent 与本地 ArcGIS Pro。"
-        "ArcPy 逻辑统一通过 ArcGIS Pro 自带 Python 子进程执行。"
+        "Bridges AI agents with local ArcGIS Pro. "
+        "ArcPy logic executes via ArcGIS Pro's bundled Python subprocess."
     ),
     json_response=True,
 )
 
 
+def _validate_gis_path(path: str | None, label: str) -> str | None:
+    """Validate a GIS path against ARCGIS_MCP_ALLOWED_PATHS if set."""
+    if path is None:
+        return None
+    try:
+        return str(validate_path(path))
+    except ValueError as exc:
+        raise ValueError(f"{label}: {exc}") from exc
+
+
 class ArcGISDiscoveryError(RuntimeError):
-    """未能发现 ArcGIS Pro 环境时抛出的异常。"""
+    """Raised when ArcGIS Pro environment cannot be discovered."""
+
+
+class ArcGISProNotRunningError(RuntimeError):
+    """Raised when open_current_project=True but ArcGIS Pro is not running."""
+
+
+def is_running_inside_pro() -> bool:
+    """Detect whether this process is running inside ArcGIS Pro's Python window.
+
+    ArcGIS Pro sets the ARCGIS_PRO_RUNNING environment variable and provides
+    arcpy.mp.ArcGISProject("CURRENT") only when running in-process.
+    """
+    if os.environ.get("ARCGIS_PRO_RUNNING") == "1":
+        return True
+    try:
+        import arcpy  # type: ignore
+
+        test_project = arcpy.mp.ArcGISProject("CURRENT")
+        return getattr(test_project, "filePath", None) is not None
+    except Exception:
+        return False
 
 
 @dataclass(slots=True)
@@ -146,12 +178,12 @@ def _iter_registry_install_dirs() -> list[tuple[str, str]]:
         return []
 
     discovered: list[tuple[str, str]] = []
-    registry_views = [0]
     key_read = getattr(winreg, "KEY_READ", 0)
+    registry_views = [key_read]
     for extra_flag_name in ("KEY_WOW64_64KEY", "KEY_WOW64_32KEY"):
         extra_flag = getattr(winreg, extra_flag_name, 0)
         if extra_flag:
-            registry_views.append(extra_flag)
+            registry_views.append(key_read | extra_flag)
 
     for registry_path in ARCGIS_REGISTRY_PATHS:
         for view_flag in registry_views:
@@ -204,7 +236,7 @@ def clear_discovery_cache() -> None:
 
 @lru_cache(maxsize=1)
 def discover_arcgis_pro_python() -> ArcGISPythonInfo:
-    """自动发现 ArcGIS Pro 自带 Python 解释器。"""
+    """Auto-discover ArcGIS Pro's bundled Python interpreter."""
     for source, python_path, install_dir in _build_python_candidates():
         if Path(python_path).exists():
             return ArcGISPythonInfo(
@@ -214,13 +246,13 @@ def discover_arcgis_pro_python() -> ArcGISPythonInfo:
             )
 
     raise ArcGISDiscoveryError(
-        "未找到 ArcGIS Pro Python 解释器。请确认已安装 ArcGIS Pro，"
-        "或通过 ARCGIS_PRO_PYTHON / ARCGIS_PRO_INSTALL_DIR 提供路径。"
+        "ArcGIS Pro Python interpreter not found. Confirm ArcGIS Pro is installed, "
+        "or provide path via ARCGIS_PRO_PYTHON / ARCGIS_PRO_INSTALL_DIR."
     )
 
 
 def _build_runner_script() -> str:
-    """生成在 ArcGIS Python 环境中执行的包装脚本。"""
+    """Generate wrapper script executed in ArcGIS Python environment."""
     return dedent(
         """
         from __future__ import annotations
@@ -242,6 +274,9 @@ def _build_runner_script() -> str:
         project_path = payload.get("project_path")
         open_current_project = payload.get("open_current_project", False)
         require_arcpy = payload.get("require_arcpy", True)
+
+        class ArcGISProNotRunningError(RuntimeError):
+            pass
 
         stdout_buffer = io.StringIO()
         stderr_buffer = io.StringIO()
@@ -268,7 +303,15 @@ def _build_runner_script() -> str:
                     arcpy.env.workspace = workspace
 
                 def open_project(path=None):
-                    target = path or project_path or "CURRENT"
+                    if open_current_project and not path and not project_path:
+                        raise ArcGISProNotRunningError(
+                            'ArcGISProject("CURRENT") only works inside '
+                            "ArcGIS Pro's Python window. "
+                            "Close ArcGIS Pro and provide an explicit .aprx "
+                            "path via project_path, or run this code directly "
+                            "in ArcGIS Pro's Python window."
+                        )
+                    target = path or project_path
                     return arcpy.mp.ArcGISProject(target)
 
                 namespace["open_project"] = open_project
@@ -276,7 +319,10 @@ def _build_runner_script() -> str:
                 if project_path:
                     namespace["arcgis_project"] = arcpy.mp.ArcGISProject(project_path)
                 elif open_current_project:
-                    namespace["arcgis_project"] = arcpy.mp.ArcGISProject("CURRENT")
+                    raise ArcGISProNotRunningError(
+                        "open_current_project=True only works inside ArcGIS Pro's Python window. "
+                        "Provide a project_path parameter with an explicit .aprx file path instead."
+                    )
 
             os.environ["ARCGIS_MCP_WORKSPACE"] = workspace or ""
             os.environ["ARCGIS_MCP_PROJECT_PATH"] = project_path or ""
@@ -322,7 +368,7 @@ def run_in_arcgis_env(
     python_executable: str | None = None,
     require_arcpy: bool = True,
 ) -> ArcPyExecutionResult:
-    """在 ArcGIS Pro Python 环境中执行代码，并回收结构化结果。"""
+    """Execute code in ArcGIS Pro Python environment and return structured results."""
     resolved_python = python_executable
     if resolved_python is None:
         resolved_python = discover_arcgis_pro_python().python_executable
@@ -369,9 +415,15 @@ def run_in_arcgis_env(
                 data=None,
                 error={
                     "type": "TimeoutExpired",
-                    "message": f"ArcGIS Python 子进程执行超时，超过 {timeout_seconds} 秒。",
+                    "message": (
+                        "ArcGIS Python subprocess execution timed out "
+                        f"after {timeout_seconds} seconds."
+                    ),
                 },
-                hint="请缩小处理范围、优化脚本，或适当提高 timeout_seconds 后重试。",
+                hint=(
+                    "Narrow the processing scope, optimize the script, "
+                    "or increase timeout_seconds and retry."
+                ),
                 workspace=workspace,
                 project_path=project_path,
             )
@@ -386,7 +438,7 @@ def run_in_arcgis_env(
                 "data": None,
                 "error": {
                     "type": "RunnerExecutionError",
-                    "message": "ArcGIS Python 子进程未生成结果文件。",
+                    "message": "ArcGIS Python subprocess did not produce a result file.",
                 },
                 "workspace": workspace,
                 "project_path": project_path,
@@ -530,7 +582,7 @@ gdb_schema_resource = _resource_handlers["gdb_schema_resource"]
 
 @mcp.tool()
 def detect_arcgis_environment() -> dict[str, Any]:
-    """检测 ArcGIS Pro 安装与 Python 解释器路径。"""
+    """Detect ArcGIS Pro installation and Python interpreter path."""
     try:
         return {
             "status": "ready",
@@ -546,25 +598,29 @@ def detect_arcgis_environment() -> dict[str, Any]:
 
 @mcp.tool()
 def ping() -> dict[str, Any]:
-    """返回一个最小可验证结果，用于确认客户端已真正调用 MCP Tool。"""
+    """Return a minimal verifiable result to confirm the client is actually calling the MCP Tool."""
     return {
         "status": "ok",
         "server": SERVER_NAME,
         "timestamp_utc": timestamp_utc_iso(),
-        "message": "如果你看到这条结果，说明这次请求已经真正进入 MCP Tool 调用链路。",
+        "message": (
+            "If you see this result, the request has successfully entered the MCP Tool call chain."
+        ),
     }
 
 
 @mcp.tool()
 def health_check(timeout_seconds: int = 30) -> dict[str, Any]:
-    """返回轻量级健康检查，帮助快速判断 MCP 与 ArcGIS 环境是否可用。"""
+    """Return a lightweight health check to determine if MCP and
+    ArcGIS environment are available.
+    """
     payload: dict[str, Any] = {
         "status": "ready",
         "server": SERVER_NAME,
         "timestamp_utc": timestamp_utc_iso(),
         "mcp": {
             "status": "ok",
-            "message": "health_check 已被实际调用，客户端当前正在使用 MCP Tool。",
+            "message": "health_check has been called, client is currently using MCP Tool.",
         },
     }
 
@@ -576,8 +632,10 @@ def health_check(timeout_seconds: int = 30) -> dict[str, Any]:
         payload["arcgis_python"] = None
         payload["message"] = str(exc)
         payload["next_step"] = (
-            "请先确认 ArcGIS Pro 已安装且可正常启动；如果是在 Trae 或 Cursor 中测试，"
-            "请明确要求客户端直接调用 MCP Tool，而不是写测试脚本或手动启动 server。"
+            "Confirm ArcGIS Pro is installed and can start; if testing "
+            "in Trae or Cursor, explicitly ask the client to call the "
+            "MCP Tool directly instead of writing test scripts or "
+            "manually starting the server."
         )
         return payload
 
@@ -590,30 +648,32 @@ def health_check(timeout_seconds: int = 30) -> dict[str, Any]:
         payload["message"] = (
             runtime_result.error.get("message")
             if runtime_result.error
-            else "ArcPy 运行时检查未通过。"
+            else "ArcPy runtime check did not pass."
         )
         payload["next_step"] = (
-            "建议下一步调用 doctor 获取完整诊断，"
-            "重点检查许可状态、ArcPy 运行时和客户端是否真的走了 MCP。"
+            "Next step: call doctor for full diagnostics, "
+            "focus on license status, ArcPy runtime, and whether the client is actually using MCP."
         )
         return payload
 
-    payload["message"] = "MCP 可达，ArcGIS Pro Python 已发现，ArcPy 运行时检查通过。"
+    payload["message"] = "MCP reachable, ArcGIS Pro Python discovered, ArcPy runtime check passed."
     payload["next_step"] = (
-        "可以继续调用 inspect_gdb、inspect_project_context、buffer_features 或 clip_features。"
+        "Continue with inspect_gdb, inspect_project_context, buffer_features, or clip_features."
     )
     return payload
 
 
 @mcp.tool()
 def doctor(timeout_seconds: int = 60) -> dict[str, Any]:
-    """返回面向 GISer 的完整环境诊断报告。"""
+    """Return a comprehensive environment diagnostic report for GIS users."""
     return _build_doctor_report(timeout_seconds=timeout_seconds)
 
 
 @mcp.tool()
 def debug_runtime_context() -> dict[str, Any]:
-    """返回当前 MCP 进程的运行上下文，用于排查 Trae 或沙箱环境差异。"""
+    """Return the current MCP process runtime context for debugging
+    Trae or sandbox environment differences.
+    """
     return {
         "status": "ready",
         "server": SERVER_NAME,
@@ -630,7 +690,14 @@ def execute_arcpy_code(
     open_current_project: bool = False,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """在 ArcGIS Pro Python 环境中执行 ArcPy 代码并返回 stdout、stderr 与异常信息。"""
+    """Execute ArcPy code in ArcGIS Pro Python environment and return
+    stdout, stderr, and exception info.
+    """
+    try:
+        workspace = _validate_gis_path(workspace, "workspace")
+        project_path = _validate_gis_path(project_path, "project_path")
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     try:
         result = run_in_arcgis_env(
             code,
@@ -659,7 +726,13 @@ def buffer_features(
     workspace: str | None = None,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """执行常用 Buffer 分析，返回输出要素摘要和执行信息。"""
+    """Execute Buffer analysis, return output feature summary and execution info."""
+    try:
+        in_features = _validate_gis_path(in_features, "in_features")
+        out_feature_class = _validate_gis_path(out_feature_class, "out_feature_class")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "buffer_features", "status": "error", "message": str(exc)}
     try:
         result = run_in_arcgis_env(
             build_buffer_features_code(
@@ -686,7 +759,7 @@ def buffer_features(
         tool_name="buffer_features",
         result_to_dict=result_to_dict,
         coerce_result_data=coerce_result_data,
-        message="Buffer 执行完成。" if result.status == "success" else None,
+        message="Buffer execution completed." if result.status == "success" else None,
         inputs={
             "in_features": in_features,
             "out_feature_class": out_feature_class,
@@ -709,7 +782,14 @@ def clip_features(
     workspace: str | None = None,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """执行常用 Clip 分析，返回输出要素摘要和执行信息。"""
+    """Execute Clip analysis, return output feature summary and execution info."""
+    try:
+        in_features = _validate_gis_path(in_features, "in_features")
+        clip_features_path = _validate_gis_path(clip_features_path, "clip_features_path")
+        out_feature_class = _validate_gis_path(out_feature_class, "out_feature_class")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "clip_features", "status": "error", "message": str(exc)}
     try:
         result = run_in_arcgis_env(
             build_clip_features_code(
@@ -734,7 +814,7 @@ def clip_features(
         tool_name="clip_features",
         result_to_dict=result_to_dict,
         coerce_result_data=coerce_result_data,
-        message="Clip 执行完成。" if result.status == "success" else None,
+        message="Clip execution completed." if result.status == "success" else None,
         inputs={
             "in_features": in_features,
             "clip_features": clip_features_path,
@@ -752,7 +832,7 @@ def build_gis_resource_uri(
     path: str | None = None,
     open_current_project: bool = False,
 ) -> dict[str, Any]:
-    """根据资源类型与本地路径生成可读取的 ArcGIS Resource URI。"""
+    """Generate a readable ArcGIS Resource URI based on resource type and local path."""
     if resource_kind == "project_layers":
         return {
             "status": "ready",
@@ -777,7 +857,7 @@ def build_gis_resource_uri(
         if not path:
             return {
                 "status": "error",
-                "message": "gdb_schema 资源必须提供 gdb 路径。",
+                "message": "gdb_schema resource requires a gdb path.",
             }
         return {
             "status": "ready",
@@ -788,7 +868,8 @@ def build_gis_resource_uri(
     return {
         "status": "error",
         "message": (
-            "不支持的 resource_kind，可选值为 project_layers、project_context 或 gdb_schema。"
+            "Unsupported resource_kind, valid values are project_layers, "
+            "project_context, or gdb_schema."
         ),
     }
 
@@ -801,7 +882,13 @@ def list_gis_layers(
     include_fields: bool = False,
     include_data_source_details: bool = False,
 ) -> dict[str, Any]:
-    """列出工程中的地图、图层、字段与空间参考，并返回对应 Resource URI。"""
+    """List maps, layers, fields, and spatial references in the project
+    and return corresponding Resource URI.
+    """
+    try:
+        project_path = _validate_gis_path(project_path, "project_path")
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     result = _read_project_layers(
         project_path=project_path,
         open_current_project=open_current_project,
@@ -826,7 +913,13 @@ def inspect_project_context(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     include_source_details: bool = False,
 ) -> dict[str, Any]:
-    """读取工程概览，包括布局、地图框、默认地图候选与数据源状态。"""
+    """Read project overview including layouts, map frames, default map
+    candidates, and data source status.
+    """
+    try:
+        project_path = _validate_gis_path(project_path, "project_path")
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     result = _read_project_context(
         project_path=project_path,
         open_current_project=open_current_project,
@@ -845,7 +938,13 @@ def inspect_project_context(
 
 @mcp.tool()
 def inspect_gdb(gdb_path: str) -> dict[str, Any]:
-    """检查 GDB 的要素类、字段与空间参考，并返回对应 Resource URI。"""
+    """Inspect GDB feature classes, fields, and spatial references and
+    return corresponding Resource URI.
+    """
+    try:
+        gdb_path = _validate_gis_path(gdb_path, "gdb_path")
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     result = _read_gdb_schema(gdb_path)
     return build_resource_payload(
         result,
@@ -858,19 +957,21 @@ def inspect_gdb(gdb_path: str) -> dict[str, Any]:
 def generate_sync_plan(
     source_description: str, project_context: str | None = None
 ) -> dict[str, Any]:
-    """数据同步逻辑的占位接口，后续可扩展为差异分析与脚本生成能力。"""
+    """Placeholder interface for data sync logic, to be extended later
+    with diff analysis and script generation.
+    """
     return {
         "status": "todo",
-        "message": "数据同步能力尚未实现，当前版本已预留工具接口。",
+        "message": "Data sync capability is not yet implemented, tool interface is reserved.",
         "source_description": source_description,
         "project_context": project_context,
     }
 
 
 def main() -> None:
-    """服务启动入口。"""
+    """Server startup entry point."""
     if sys.platform != "win32":
-        print("警告：ArcGIS Pro MCP Server 设计目标平台为 Windows。", file=sys.stderr)
+        print("Warning: ArcGIS Pro MCP Server is designed for Windows.", file=sys.stderr)
     mcp.run()
 
 

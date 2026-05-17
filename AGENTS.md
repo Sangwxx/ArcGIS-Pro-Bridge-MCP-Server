@@ -82,4 +82,14 @@ The server also exposes these MCP Resources:
 
 - The server cannot click around the ArcGIS Pro GUI
 - `arcpy.mp.ArcGISProject("CURRENT")` is unavailable from outside Pro's Python window
+- `open_current_project=True` will fail with a clear error — always provide an explicit `.aprx` path
 - If Pro is open on the same `.aprx`, write operations will fail with a lock error
+
+### Working with Projects
+
+| Scenario | Approach |
+|----------|----------|
+| ArcGIS Pro is **closed** | Use `project_path="C:\\path\\to\\project.aprx"` — reads from disk |
+| ArcGIS Pro is **open** (read-only) | Use `.aprx` archive reader — no live session access |
+| ArcGIS Pro is **open** (write) | Save project first, close Pro, then use `project_path` |
+| Need **real-time** access | Requires C# Add-In (see FUTURE_WORK.md) |

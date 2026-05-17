@@ -6,7 +6,7 @@
         "run",
         "arcgis_mcp_server.py"
       ],
-      "cwd": "D:\\ArcgisproMCP"
+      "cwd": "/path/to/arcgis-opencode-mcp"
     }
   }
 }

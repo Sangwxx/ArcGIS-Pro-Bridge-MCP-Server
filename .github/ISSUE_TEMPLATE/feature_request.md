@@ -1,15 +1,15 @@
 ---
-name: Feature request
-about: 提出一个新功能建议
-title: "[Feature] "
+name: Feature Request
+about: Suggest a new feature
+title: ''
 labels: enhancement
-assignees: ""
+assignees: ''
 ---
 
-## 功能背景
+## Background
 
-## 你希望实现什么
+## What would you like to see implemented?
 
-## 可能的使用场景
+## Possible Use Cases
 
-## 其他补充
+## Additional Context
