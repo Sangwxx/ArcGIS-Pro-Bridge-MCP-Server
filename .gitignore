@@ -1,9 +1,12 @@
-# AI 代理与本地治理文档
+# AI agent and local governance docs
 .agentdocs/
 CLAUDE.md
 # AGENTS.md - Unignored for OpenCode integration
 
-# Python 虚拟环境与缓存
+# Machine-specific opencode config (contains local paths)
+opencode.json
+
+# Python virtual environments and caches
 .venv/
 __pycache__/
 *.py[cod]
@@ -14,13 +17,13 @@ __pycache__/
 .coverage
 coverage.xml
 
-# IDE 与系统文件
+# IDE and system files
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
 
-# 本地临时文件
+# Local temporary files
 *.tmp
 *.temp
 *.log

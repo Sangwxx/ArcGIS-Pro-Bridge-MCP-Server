@@ -93,7 +93,7 @@ class AprxArchiveReader:
             "dataset_type": connection.get("datasetType"),
             "resolved_dataset_path": resolved_dataset_path,
             "status": "not_validated",
-            "message": "基于 aprx 元数据解析，未访问实际数据源。",
+            "message": "Parsed from aprx metadata, actual data source not accessed.",
         }
 
     def _summarize_connection(self, connection: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -108,14 +108,14 @@ class AprxArchiveReader:
                 "name": connection.get("name"),
                 "join_type": connection.get("joinType"),
                 "status": "not_validated",
-                "message": "基于 aprx 元数据解析，未访问实际数据源。",
+                "message": "Parsed from aprx metadata, actual data source not accessed.",
                 "source_table": self._summarize_connection(connection.get("sourceTable")),
                 "destination_table": self._summarize_connection(connection.get("destinationTable")),
             }
         return {
             "type": connection_type,
             "status": "not_validated",
-            "message": "基于 aprx 元数据解析，未访问实际数据源。",
+            "message": "Parsed from aprx metadata, actual data source not accessed.",
         }
 
     def _extract_fields(
@@ -186,7 +186,7 @@ class AprxArchiveReader:
                 if include_data_source_details
                 else {
                     "status": "not_validated",
-                    "message": "默认轻量模式下未探测数据源详情。",
+                    "message": "Data source details not probed in default lightweight mode.",
                 }
             ),
             "fields": self._extract_fields(layer_json, include_fields=include_fields),

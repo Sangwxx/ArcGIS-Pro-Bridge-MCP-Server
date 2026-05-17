@@ -41,7 +41,7 @@ def build_project_layers_code(
             return {
                 "path": data_source,
                 "status": "skipped",
-                "message": "默认轻量模式下未探测数据源详情。",
+                "message": "Data source details not probed in default lightweight mode.",
             }
         try:
             description = arcpy.Describe(data_source)
@@ -142,87 +142,86 @@ def build_project_layers_code(
 
 
 def build_gdb_schema_code(gdb_path: str) -> str:
-    return dedent(
-        f"""
-        def spatial_reference_to_dict(spatial_reference):
-            if not spatial_reference:
-                return None
-            return {{
-                "name": getattr(spatial_reference, "name", None),
-                "factory_code": getattr(spatial_reference, "factoryCode", None),
-                "type": getattr(spatial_reference, "type", None),
-                "linear_unit_name": getattr(spatial_reference, "linearUnitName", None),
-            }}
+    code = """
+    def spatial_reference_to_dict(spatial_reference):
+        if not spatial_reference:
+            return None
+        return {
+            "name": getattr(spatial_reference, "name", None),
+            "factory_code": getattr(spatial_reference, "factoryCode", None),
+            "type": getattr(spatial_reference, "type", None),
+            "linear_unit_name": getattr(spatial_reference, "linearUnitName", None),
+        }
 
 
-        def describe_fields(dataset_name):
-            return [
-                {{
-                    "name": field.name,
-                    "alias": field.aliasName,
-                    "type": field.type,
-                    "length": field.length,
-                    "nullable": field.isNullable,
-                }}
-                for field in arcpy.ListFields(dataset_name)
-            ]
-
-
-        def describe_feature_class(feature_class_name):
-            description = arcpy.Describe(feature_class_name)
-            return {{
-                "name": feature_class_name,
-                "catalog_path": getattr(description, "catalogPath", None),
-                "shape_type": getattr(description, "shapeType", None),
-                "feature_type": getattr(description, "featureType", None),
-                "spatial_reference": spatial_reference_to_dict(
-                    getattr(description, "spatialReference", None)
-                ),
-                "fields": describe_fields(feature_class_name),
-            }}
-
-
-        arcpy.env.workspace = {gdb_path!r}
-        feature_datasets = []
-        for dataset_name in arcpy.ListDatasets("*", "Feature") or []:
-            feature_datasets.append(
-                {{
-                    "name": dataset_name,
-                    "feature_classes": [
-                        describe_feature_class(feature_class_name)
-                        for feature_class_name in (
-                            arcpy.ListFeatureClasses(feature_dataset=dataset_name) or []
-                        )
-                    ],
-                }}
-            )
-
-        standalone_feature_classes = [
-            describe_feature_class(feature_class_name)
-            for feature_class_name in (arcpy.ListFeatureClasses(feature_dataset="") or [])
+    def describe_fields(dataset_name):
+        return [
+            {
+                "name": field.name,
+                "alias": field.aliasName,
+                "type": field.type,
+                "length": field.length,
+                "nullable": field.isNullable,
+            }
+            for field in arcpy.ListFields(dataset_name)
         ]
 
-        tables = []
-        for table_name in arcpy.ListTables() or []:
-            description = arcpy.Describe(table_name)
-            tables.append(
-                {{
-                    "name": table_name,
-                    "catalog_path": getattr(description, "catalogPath", None),
-                    "fields": describe_fields(table_name),
-                }}
-            )
 
-        set_result(
-            {{
-                "workspace": arcpy.env.workspace,
-                "feature_datasets": feature_datasets,
-                "standalone_feature_classes": standalone_feature_classes,
-                "tables": tables,
-            }}
+    def describe_feature_class(feature_class_name):
+        description = arcpy.Describe(feature_class_name)
+        return {
+            "name": feature_class_name,
+            "catalog_path": getattr(description, "catalogPath", None),
+            "shape_type": getattr(description, "shapeType", None),
+            "feature_type": getattr(description, "featureType", None),
+            "spatial_reference": spatial_reference_to_dict(
+                getattr(description, "spatialReference", None)
+            ),
+            "fields": describe_fields(feature_class_name),
+        }
+
+
+    arcpy.env.workspace = __GDB_PATH__
+    feature_datasets = []
+    for dataset_name in arcpy.ListDatasets("*", "Feature") or []:
+        feature_datasets.append(
+            {
+                "name": dataset_name,
+                "feature_classes": [
+                    describe_feature_class(feature_class_name)
+                    for feature_class_name in (
+                        arcpy.ListFeatureClasses(feature_dataset=dataset_name) or []
+                    )
+                ],
+            }
         )
-        """
-    ).strip()
+
+    standalone_feature_classes = [
+        describe_feature_class(feature_class_name)
+        for feature_class_name in (arcpy.ListFeatureClasses(feature_dataset="") or [])
+    ]
+
+    tables = []
+    for table_name in arcpy.ListTables() or []:
+        description = arcpy.Describe(table_name)
+        tables.append(
+            {
+                "name": table_name,
+                "catalog_path": getattr(description, "catalogPath", None),
+                "fields": describe_fields(table_name),
+            }
+        )
+
+    set_result(
+        {
+            "workspace": arcpy.env.workspace,
+            "feature_datasets": feature_datasets,
+            "standalone_feature_classes": standalone_feature_classes,
+            "tables": tables,
+        }
+    )
+    """
+    return dedent(code).replace("__GDB_PATH__", repr(gdb_path)).strip()
 
 
 def build_project_context_code(include_source_details: bool = False) -> str:
@@ -253,7 +252,7 @@ def build_project_context_code(include_source_details: bool = False) -> str:
                 "path": data_source,
                 "status": "broken" if is_broken else "skipped",
                 "is_broken": is_broken,
-                "message": "默认轻量模式下未探测数据源详情。",
+                "message": "Data source details not probed in default lightweight mode.",
             }
 
         try:
@@ -466,36 +465,44 @@ def build_buffer_features_code(
     dissolve_field: str | None,
     method: str,
 ) -> str:
-    return dedent(
-        f"""
-        result = arcpy.analysis.Buffer(
-            in_features={in_features!r},
-            out_feature_class={out_feature_class!r},
-            buffer_distance_or_field={buffer_distance_or_field!r},
-            dissolve_option={dissolve_option!r},
-            dissolve_field={dissolve_field!r},
-            method={method!r},
-        )
+    code = """
+    result = arcpy.analysis.Buffer(
+        in_features=__IN_FEATURES__,
+        out_feature_class=__OUT_FEATURE_CLASS__,
+        buffer_distance_or_field=__BUFFER_DISTANCE_OR_FIELD__,
+        dissolve_option=__DISSOLVE_OPTION__,
+        dissolve_field=__DISSOLVE_FIELD__,
+        method=__METHOD__,
+    )
 
-        output_path = result.getOutput(0)
-        description = arcpy.Describe(output_path)
-        count_result = arcpy.management.GetCount(output_path)
-        set_result(
-            {{
-                "tool": "Buffer",
-                "output_path": output_path,
-                "row_count": int(count_result.getOutput(0)),
-                "shape_type": getattr(description, "shapeType", None),
-                "spatial_reference": {{
-                    "name": getattr(getattr(description, "spatialReference", None), "name", None),
-                    "factory_code": getattr(
-                        getattr(description, "spatialReference", None), "factoryCode", None
-                    ),
-                }},
-            }}
-        )
-        """
-    ).strip()
+    output_path = result.getOutput(0)
+    description = arcpy.Describe(output_path)
+    count_result = arcpy.management.GetCount(output_path)
+    set_result(
+        {
+            "tool": "Buffer",
+            "output_path": output_path,
+            "row_count": int(count_result.getOutput(0)),
+            "shape_type": getattr(description, "shapeType", None),
+            "spatial_reference": {
+                "name": getattr(getattr(description, "spatialReference", None), "name", None),
+                "factory_code": getattr(
+                    getattr(description, "spatialReference", None), "factoryCode", None
+                ),
+            },
+        }
+    )
+    """
+    return (
+        dedent(code)
+        .replace("__IN_FEATURES__", repr(in_features))
+        .replace("__OUT_FEATURE_CLASS__", repr(out_feature_class))
+        .replace("__BUFFER_DISTANCE_OR_FIELD__", repr(buffer_distance_or_field))
+        .replace("__DISSOLVE_OPTION__", repr(dissolve_option))
+        .replace("__DISSOLVE_FIELD__", repr(dissolve_field))
+        .replace("__METHOD__", repr(method))
+        .strip()
+    )
 
 
 def build_clip_features_code(
@@ -504,31 +511,37 @@ def build_clip_features_code(
     out_feature_class: str,
     cluster_tolerance: str | None,
 ) -> str:
-    return dedent(
-        f"""
-        result = arcpy.analysis.Clip(
-            in_features={in_features!r},
-            clip_features={clip_features!r},
-            out_feature_class={out_feature_class!r},
-            cluster_tolerance={cluster_tolerance!r},
-        )
+    code = """
+    result = arcpy.analysis.Clip(
+        in_features=__IN_FEATURES__,
+        clip_features=__CLIP_FEATURES__,
+        out_feature_class=__OUT_FEATURE_CLASS__,
+        cluster_tolerance=__CLUSTER_TOLERANCE__,
+    )
 
-        output_path = result.getOutput(0)
-        description = arcpy.Describe(output_path)
-        count_result = arcpy.management.GetCount(output_path)
-        set_result(
-            {{
-                "tool": "Clip",
-                "output_path": output_path,
-                "row_count": int(count_result.getOutput(0)),
-                "shape_type": getattr(description, "shapeType", None),
-                "spatial_reference": {{
-                    "name": getattr(getattr(description, "spatialReference", None), "name", None),
-                    "factory_code": getattr(
-                        getattr(description, "spatialReference", None), "factoryCode", None
-                    ),
-                }},
-            }}
-        )
-        """
-    ).strip()
+    output_path = result.getOutput(0)
+    description = arcpy.Describe(output_path)
+    count_result = arcpy.management.GetCount(output_path)
+    set_result(
+        {
+            "tool": "Clip",
+            "output_path": output_path,
+            "row_count": int(count_result.getOutput(0)),
+            "shape_type": getattr(description, "shapeType", None),
+            "spatial_reference": {
+                "name": getattr(getattr(description, "spatialReference", None), "name", None),
+                "factory_code": getattr(
+                    getattr(description, "spatialReference", None), "factoryCode", None
+                ),
+            },
+        }
+    )
+    """
+    return (
+        dedent(code)
+        .replace("__IN_FEATURES__", repr(in_features))
+        .replace("__CLIP_FEATURES__", repr(clip_features))
+        .replace("__OUT_FEATURE_CLASS__", repr(out_feature_class))
+        .replace("__CLUSTER_TOLERANCE__", repr(cluster_tolerance))
+        .strip()
+    )

@@ -9,4 +9,4 @@ arcpy.analysis.Buffer(
     buffer_distance_or_field="50 Meters",
 )
 
-print(f"Buffer 完成：{output_fc}")
+print(f"Buffer completed: {output_fc}")

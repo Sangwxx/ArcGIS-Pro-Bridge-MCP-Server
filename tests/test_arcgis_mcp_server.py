@@ -11,6 +11,11 @@ from uuid import uuid4
 
 import arcgis_mcp_server as server
 from arcgis_runtime_utils import build_arcgis_subprocess_env, remove_tree
+from arcgis_script_templates import (
+    build_buffer_features_code,
+    build_clip_features_code,
+    build_gdb_schema_code,
+)
 
 TEST_TEMP_ROOT = Path.cwd() / ".tmp-tests"
 TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -374,13 +379,13 @@ class DiagnosticToolTests(unittest.TestCase):
     def test_health_check_reports_unavailable_when_discovery_fails(self) -> None:
         with patch(
             "arcgis_mcp_server.discover_arcgis_pro_python",
-            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro 未安装"),
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro not installed"),
         ):
             payload = server.health_check()
 
         self.assertEqual(payload["status"], "unavailable")
         self.assertIsNone(payload["arcgis_python"])
-        self.assertIn("ArcGIS Pro 未安装", payload["message"])
+        self.assertIn("ArcGIS Pro not installed", payload["message"])
 
     def test_health_check_reports_ready_when_runtime_passes(self) -> None:
         python_info = server.ArcGISPythonInfo(
@@ -606,7 +611,7 @@ class GeoprocessingToolTests(unittest.TestCase):
     def test_buffer_features_returns_unavailable_when_discovery_fails(self) -> None:
         with patch(
             "arcgis_mcp_server.run_in_arcgis_env",
-            side_effect=server.ArcGISDiscoveryError("未找到 ArcGIS Pro Python"),
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
         ):
             payload = server.buffer_features(
                 in_features="in_fc",
@@ -616,6 +621,56 @@ class GeoprocessingToolTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "unavailable")
         self.assertEqual(payload["tool"], "buffer_features")
+
+
+class TemplateCompilationTests(unittest.TestCase):
+    def test_buffer_features_code_generates_valid_python(self) -> None:
+        code = build_buffer_features_code(
+            in_features="roads",
+            out_feature_class="roads_buf",
+            buffer_distance_or_field="50 Meters",
+            dissolve_option="NONE",
+            dissolve_field=None,
+            method="PLANAR",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_buffer_features_code_handles_special_chars(self) -> None:
+        code = build_buffer_features_code(
+            in_features=r"C:\GIS\Data\roads.shp",
+            out_feature_class=r"C:\GIS\Data\output.gdb\roads_buf",
+            buffer_distance_or_field="100 Meters",
+            dissolve_option="ALL",
+            dissolve_field="NAME;TYPE",
+            method="GEODESIC",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_clip_features_code_generates_valid_python(self) -> None:
+        code = build_clip_features_code(
+            in_features="roads",
+            clip_features="boundary",
+            out_feature_class="roads_clip",
+            cluster_tolerance="0.001 Meters",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_clip_features_code_handles_special_chars(self) -> None:
+        code = build_clip_features_code(
+            in_features=r"C:\GIS\Data\roads.shp",
+            clip_features=r"C:\GIS\Data\boundary.gdb\county",
+            out_feature_class=r"C:\GIS\Data\output.gdb\roads_clip",
+            cluster_tolerance=None,
+        )
+        compile(code, "<test>", "exec")
+
+    def test_gdb_schema_code_generates_valid_python(self) -> None:
+        code = build_gdb_schema_code(r"C:\GIS\Data\sample.gdb")
+        compile(code, "<test>", "exec")
+
+    def test_gdb_schema_code_handles_special_chars(self) -> None:
+        code = build_gdb_schema_code(r"D:\GIS\Projects\My Data\output.gdb")
+        compile(code, "<test>", "exec")
 
 
 if __name__ == "__main__":
