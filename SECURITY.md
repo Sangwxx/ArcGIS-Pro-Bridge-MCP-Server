@@ -1,18 +1,18 @@
-# 安全说明
+# Security Notes
 
-## 安全边界
-本项目提供的 `execute_arcpy_code` 本质上是本地 Python / ArcPy 代码执行能力。
+## Security Boundary
+The `execute_arcpy_code` tool provided by this project is essentially a local Python / ArcPy code execution capability.
 
-这意味着：
-- AI Agent 可以在当前用户权限下执行 Python 代码。
-- 如果脚本访问本地文件、数据库、网络或 ArcGIS 数据源，风险与本机直接运行脚本相同。
+This means:
+- AI Agents can execute Python code under the current user's permissions.
+- If scripts access local files, databases, networks, or ArcGIS data sources, the risk is the same as running scripts directly on the machine.
 
-## 使用建议
-- 仅在你信任的本地机器上运行。
-- 不要将其直接暴露到公网。
-- 不要在未审查的情况下对生产数据库或正式数据执行写操作。
-- 对重要地理数据先做备份，再让 AI 执行地理处理。
+## Usage Recommendations
+- Only run on a local machine you trust.
+- Do not expose directly to the public internet.
+- Do not execute write operations against production databases or official data without review.
+- Always backup important geospatial data before letting AI execute geoprocessing.
 
-## 漏洞反馈
-如发现安全问题，请不要在公开 Issue 中直接披露利用细节。
-建议先通过私下渠道联系维护者，确认修复方案后再公开。
+## Vulnerability Reporting
+If you discover a security issue, please do not disclose exploitation details in a public issue.
+Contact the maintainers privately first, and coordinate public disclosure after a fix is confirmed.

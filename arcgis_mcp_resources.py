@@ -76,7 +76,7 @@ def register_resources(
 ) -> dict[str, Callable[..., str]]:
     @mcp.resource("arcgis://server/status")
     def server_status() -> str:
-        """返回当前服务与 ArcGIS 环境发现状态。"""
+        """Return current server and ArcGIS environment discovery status."""
         try:
             python_info = discover_arcgis_pro_python()
             payload = {
@@ -94,8 +94,8 @@ def register_resources(
 
     @mcp.resource(
         "arcgis://resources/catalog",
-        title="ArcGIS 资源目录",
-        description="列出当前服务提供的固定资源与模板资源。",
+        title="ArcGIS Resource Catalog",
+        description="List fixed and template resources provided by this server.",
         mime_type="application/json",
     )
     def gis_resource_catalog() -> str:
@@ -104,34 +104,43 @@ def register_resources(
                 {
                     "uri": "arcgis://server/status",
                     "kind": "server_status",
-                    "description": "ArcGIS Pro 环境发现状态。",
+                    "description": "ArcGIS Pro environment discovery status.",
                 },
                 {
                     "uri": "arcgis://project/current/layers",
                     "kind": "project_layers",
-                    "description": "当前打开的 ArcGIS Pro 工程图层上下文。",
+                    "description": "Current ArcGIS Pro project layer context.",
                 },
                 {
                     "uri": "arcgis://project/current/context",
                     "kind": "project_context",
-                    "description": "当前 ArcGIS Pro 工程的布局、地图框和连接状态概览。",
+                    "description": (
+                        "Current ArcGIS Pro project overview including "
+                        "layouts, map frames, and connection status."
+                    ),
                 },
                 {
                     "uri_template": "arcgis://project/{project_ref}/layers",
                     "kind": "project_layers",
-                    "description": "指定 .aprx 工程的图层上下文。",
+                    "description": "Layer context for a specified .aprx project.",
                     "path_encoding": "base64-url",
                 },
                 {
                     "uri_template": "arcgis://project/{project_ref}/context",
                     "kind": "project_context",
-                    "description": "指定 .aprx 工程的布局、地图框和连接状态概览。",
+                    "description": (
+                        "Project overview for a specified .aprx project "
+                        "including layouts, map frames, and connection status."
+                    ),
                     "path_encoding": "base64-url",
                 },
                 {
                     "uri_template": "arcgis://gdb/{gdb_ref}/schema",
                     "kind": "gdb_schema",
-                    "description": "指定文件地理数据库的要素类、字段与空间参考信息。",
+                    "description": (
+                        "Feature classes, fields, and spatial reference "
+                        "info for a specified file geodatabase."
+                    ),
                     "path_encoding": "base64-url",
                 },
             ],
@@ -153,8 +162,10 @@ def register_resources(
 
     @mcp.resource(
         "arcgis://project/current/layers",
-        title="当前工程图层上下文",
-        description="读取当前 ArcGIS Pro 工程中的地图、图层、字段与空间参考。",
+        title="Current Project Layer Context",
+        description=(
+            "Read maps, layers, fields, and spatial references from the current ArcGIS Pro project."
+        ),
         mime_type="application/json",
     )
     def current_project_layers_resource() -> str:
@@ -168,8 +179,10 @@ def register_resources(
 
     @mcp.resource(
         "arcgis://project/{project_ref}/layers",
-        title="指定工程图层上下文",
-        description="读取指定 .aprx 工程中的地图、图层、字段与空间参考。",
+        title="Specified Project Layer Context",
+        description=(
+            "Read maps, layers, fields, and spatial references from a specified .aprx project."
+        ),
         mime_type="application/json",
     )
     def project_layers_resource(project_ref: str) -> str:
@@ -180,7 +193,7 @@ def register_resources(
                 "resource_uri": f"arcgis://project/{project_ref}/layers",
                 "resource_kind": "project_layers",
                 "status": "error",
-                "message": f"无法解析 project_ref：{exc}",
+                "message": f"Unable to parse project_ref: {exc}",
             }
             return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -194,8 +207,11 @@ def register_resources(
 
     @mcp.resource(
         "arcgis://project/current/context",
-        title="当前工程概览",
-        description="读取当前 ArcGIS Pro 工程的布局、地图框、默认地图候选与数据源状态。",
+        title="Current Project Overview",
+        description=(
+            "Read layouts, map frames, default map candidates, "
+            "and data source status from the current ArcGIS Pro project."
+        ),
         mime_type="application/json",
     )
     def current_project_context_resource() -> str:
@@ -209,8 +225,11 @@ def register_resources(
 
     @mcp.resource(
         "arcgis://project/{project_ref}/context",
-        title="指定工程概览",
-        description="读取指定 .aprx 工程的布局、地图框、默认地图候选与数据源状态。",
+        title="Specified Project Overview",
+        description=(
+            "Read layouts, map frames, default map candidates, "
+            "and data source status from a specified .aprx project."
+        ),
         mime_type="application/json",
     )
     def project_context_resource(project_ref: str) -> str:
@@ -221,7 +240,7 @@ def register_resources(
                 "resource_uri": f"arcgis://project/{project_ref}/context",
                 "resource_kind": "project_context",
                 "status": "error",
-                "message": f"无法解析 project_ref：{exc}",
+                "message": f"Unable to parse project_ref: {exc}",
             }
             return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -235,8 +254,11 @@ def register_resources(
 
     @mcp.resource(
         "arcgis://gdb/{gdb_ref}/schema",
-        title="GDB 模式上下文",
-        description="读取指定文件地理数据库的要素类、字段和空间参考。",
+        title="GDB Schema Context",
+        description=(
+            "Read feature classes, fields, and spatial references "
+            "from a specified file geodatabase."
+        ),
         mime_type="application/json",
     )
     def gdb_schema_resource(gdb_ref: str) -> str:
@@ -247,7 +269,7 @@ def register_resources(
                 "resource_uri": f"arcgis://gdb/{gdb_ref}/schema",
                 "resource_kind": "gdb_schema",
                 "status": "error",
-                "message": f"无法解析 gdb_ref：{exc}",
+                "message": f"Unable to parse gdb_ref: {exc}",
             }
             return json.dumps(payload, ensure_ascii=False, indent=2)
 

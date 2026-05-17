@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "arcgis-pro": {
+      "type": "local",
+      "command": [
+        "C:\\Program Files\\ArcGIS\\Pro\\bin\\Python\\envs\\arcgispro-py3\\python.exe",
+        "C:\\path\\to\\arcgis-opencode-mcp\\arcgis_mcp_server.py"
+      ],
+      "enabled": true,
+      "environment": {}
+    }
+  },
+  "permission": {
+    "mcp": {
+      "arcgis-pro": "ask"
+    }
+  },
+  "instructions": ["./AGENTS.md"]
+}

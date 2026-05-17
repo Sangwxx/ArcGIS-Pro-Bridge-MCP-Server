@@ -1,12 +1,13 @@
-## 变更内容
+## Changes
 
-## 背景与目标
+## Background and Goals
 
-## 验证方式
-- [ ] `uv run ruff check .`
-- [ ] `uv run ruff format --check .`
-- [ ] `uv run python -m unittest discover -s tests -p "test_*.py"`
+## Verification
 
-## 影响范围
+- [ ] Tests pass
+- [ ] Lint passes
+- [ ] Manual testing completed
 
-## 额外说明
+## Impact
+
+## Additional Notes

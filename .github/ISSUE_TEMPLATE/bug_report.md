@@ -1,26 +1,28 @@
 ---
-name: Bug report
-about: 报告一个问题
-title: "[Bug] "
+name: Bug Report
+about: Report an issue
+title: ''
 labels: bug
-assignees: ""
+assignees: ''
 ---
 
-## 问题描述
+## Description
 
-## 复现步骤
+## Steps to Reproduce
+
 1.
 2.
 3.
 
-## 期望行为
+## Expected Behavior
 
-## 实际行为
+## Actual Behavior
 
-## 环境信息
-- Windows 版本：
-- ArcGIS Pro 版本：
-- Python 版本：
-- MCP 客户端：
+## Environment
 
-## 日志或截图
+- Windows version:
+- ArcGIS Pro version:
+- Python version:
+- MCP client:
+
+## Logs or Screenshots

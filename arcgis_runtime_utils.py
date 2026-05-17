@@ -8,7 +8,6 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
-from uuid import uuid4
 
 ENV_DROP_KEYS = {
     "PYTHONHOME",
@@ -95,6 +94,44 @@ def path_exists(path: str | None) -> bool:
     return bool(path) and Path(path).exists()
 
 
+def validate_path(path: str | os.PathLike[str]) -> Path:
+    """Validate a path against allowed directories.
+
+    If ARCGIS_MCP_ALLOWED_PATHS is set, the path must be within one of
+    the colon-separated allowed directories. If not set, all paths are
+    permitted (permissive default).
+
+    Args:
+        path: Path to validate
+
+    Returns:
+        Resolved Path if valid
+
+    Raises:
+        ValueError: If path is outside allowed directories
+    """
+    resolved = Path(path).expanduser().resolve()
+
+    allowed_paths_str = os.environ.get("ARCGIS_MCP_ALLOWED_PATHS", "")
+    if not allowed_paths_str:
+        return resolved
+
+    allowed_dirs = [Path(p).resolve() for p in allowed_paths_str.split(":") if p]
+
+    for allowed_dir in allowed_dirs:
+        try:
+            resolved.relative_to(allowed_dir)
+            return resolved
+        except ValueError:
+            continue
+
+    raise ValueError(
+        f"Path '{path}' is not within allowed directories. "
+        f"Set ARCGIS_MCP_ALLOWED_PATHS to permit specific directories. "
+        f"Current allowed paths: {allowed_dirs}"
+    )
+
+
 def build_arcgis_subprocess_env(
     base_env: Mapping[str, str] | None = None,
     *,
@@ -134,9 +171,8 @@ def create_temp_workspace(prefix: str, root: str | None = None) -> Path:
         else Path(tempfile.gettempdir()).resolve(strict=False)
     )
     base_dir.mkdir(parents=True, exist_ok=True)
-    workspace = base_dir / f"{prefix}{uuid4().hex[:8]}"
-    workspace.mkdir(parents=True, exist_ok=False)
-    return workspace
+    temp_path = tempfile.mkdtemp(prefix=prefix, dir=str(base_dir))
+    return Path(temp_path)
 
 
 def remove_tree(path: str | os.PathLike[str]) -> None:
@@ -149,12 +185,20 @@ def build_execution_hint(stderr: str, error: dict[str, Any] | None) -> str | Non
     )
     lowered = combined.lower()
     if "schema lock" in lowered or "cannot acquire a lock" in lowered:
-        return "检测到 ArcGIS 数据锁定问题，请关闭占用该数据的图层、编辑会话或外部程序后重试。"
+        return (
+            "ArcGIS data lock detected. Close layers, editing sessions, "
+            "or external programs using the data, then retry."
+        )
     if "license" in lowered and "not available" in lowered:
-        return "检测到 ArcGIS 许可不可用，请确认 ArcGIS Pro 已完成登录并具有对应工具许可。"
+        return (
+            "ArcGIS license unavailable. Confirm ArcGIS Pro is logged "
+            "in and has the required tool license."
+        )
     if "module not found" in lowered and "arcpy" in lowered:
         return (
-            "当前解释器无法导入 arcpy，请确认发现到的是 ArcGIS Pro 自带 Python，而不是普通 Python。"
+            "Current interpreter cannot import arcpy. Confirm the "
+            "discovered Python is ArcGIS Pro's bundled Python, not a "
+            "standard Python installation."
         )
     return None
 
