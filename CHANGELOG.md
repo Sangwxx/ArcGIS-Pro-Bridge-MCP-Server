@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0 - 2026-05-18
+
+### Added — Raster Analysis Tools (8 new MCP tools)
+- `validate_project_data` — Pre-flight check for all required layers, CRS, coverage, and Spatial Analyst license
+- `prepare_analysis_inputs` — One-shot data prep: clip vectors, resample DEM, derive slope, Euclidean distance rasters
+- `reclassify_criteria` — Batch reclassify multiple rasters to 1-5 suitability scale with RemapRange
+- `weighted_suitability` — Weighted Linear Combination using `arcpy.sa.WeightedSum` with weight validation and normalization
+- `conflict_analysis` — Binary conflict map + allocation map with area statistics
+- `raster_area_summary` — Area statistics by suitability class with optional CSV export
+- `sensitivity_check` — One-at-a-time weight perturbation (±10%) + threshold variation analysis
+- `export_suitability_map` — Publication-quality layout creation with PDF/PNG export
+
+### Changed
+- All raster tools use `arcpy.sa.WeightedSum` (not `WeightedOverlay`) for float weight support
+- Snap raster alignment to `forest_prop` for consistent 30m cell output
+- Default timeout for raster tools set to 600s; `prepare_analysis_inputs` uses 900s
+
 ## 0.2.0 - 2026-05-18
 
 ### Added

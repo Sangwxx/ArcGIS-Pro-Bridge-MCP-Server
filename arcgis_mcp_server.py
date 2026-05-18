@@ -52,9 +52,17 @@ from arcgis_script_templates import (
     build_arcpy_runtime_check_code,
     build_buffer_features_code,
     build_clip_features_code,
+    build_conflict_analysis_code,
+    build_export_suitability_map_code,
     build_gdb_schema_code,
+    build_prepare_analysis_inputs_code,
     build_project_context_code,
     build_project_layers_code,
+    build_raster_area_summary_code,
+    build_reclassify_criteria_code,
+    build_sensitivity_check_code,
+    build_validate_project_data_code,
+    build_weighted_suitability_code,
 )
 
 try:
@@ -962,6 +970,447 @@ def generate_sync_plan(
         "source_description": source_description,
         "project_context": project_context,
     }
+
+
+@mcp.tool()
+def validate_project_data(
+    project_gdb: str,
+    land_values_gdb: str | None = None,
+    required_layers: str = "",
+    target_srs: str = "28356",
+    study_area_fc: str | None = None,
+    workspace: str | None = None,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
+    """Pre-flight check that all required data exists and is compatible."""
+    try:
+        project_gdb = _validate_gis_path(project_gdb, "project_gdb")
+        land_values_gdb = _validate_gis_path(land_values_gdb, "land_values_gdb")
+        study_area_fc = _validate_gis_path(study_area_fc, "study_area_fc")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "validate_project_data", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_validate_project_data_code(
+                project_gdb=project_gdb,
+                land_values_gdb=land_values_gdb,
+                required_layers_json=required_layers,
+                target_srs=target_srs,
+                study_area_fc=study_area_fc,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "validate_project_data",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="validate_project_data",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Validation completed." if result.status == "success" else None,
+        inputs={
+            "project_gdb": project_gdb,
+            "land_values_gdb": land_values_gdb,
+            "required_layers": required_layers,
+            "target_srs": target_srs,
+            "study_area_fc": study_area_fc,
+        },
+    )
+
+
+@mcp.tool()
+def prepare_analysis_inputs(
+    project_gdb: str,
+    study_area_fc: str,
+    land_values_gdb: str | None = None,
+    cell_size: int = 30,
+    snap_raster_name: str = "forest_prop",
+    dem_name: str = "dem",
+    distance_sources: str = "",
+    output_gdb: str | None = None,
+    workspace: str | None = None,
+    timeout_seconds: int = 900,
+) -> dict[str, Any]:
+    """One-shot data preparation: clip, resample DEM, derive slope, create distance rasters."""
+    try:
+        project_gdb = _validate_gis_path(project_gdb, "project_gdb")
+        study_area_fc = _validate_gis_path(study_area_fc, "study_area_fc")
+        land_values_gdb = _validate_gis_path(land_values_gdb, "land_values_gdb")
+        output_gdb = _validate_gis_path(output_gdb, "output_gdb")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "prepare_analysis_inputs", "status": "error", "message": str(exc)}
+    if distance_sources == "":
+        distance_sources = json.dumps(
+            {
+                "water": "water_courses",
+                "roads": "roads_tracks",
+                "coastline": "coastline",
+                "protected": "protected_areas",
+            }
+        )
+    if output_gdb is None and project_gdb:
+        parent = os.path.dirname(project_gdb)
+        output_gdb = os.path.join(parent, "analysis_outputs.gdb")
+    try:
+        result = run_in_arcgis_env(
+            build_prepare_analysis_inputs_code(
+                project_gdb=project_gdb,
+                land_values_gdb=land_values_gdb,
+                study_area_fc=study_area_fc,
+                cell_size=cell_size,
+                snap_raster_name=snap_raster_name,
+                dem_name=dem_name,
+                distance_sources_json=distance_sources,
+                output_gdb=output_gdb,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "prepare_analysis_inputs",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="prepare_analysis_inputs",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Data preparation completed." if result.status == "success" else None,
+        inputs={
+            "project_gdb": project_gdb,
+            "study_area_fc": study_area_fc,
+            "cell_size": cell_size,
+            "output_gdb": output_gdb,
+        },
+    )
+
+
+@mcp.tool()
+def reclassify_criteria(
+    reclass_table: str,
+    output_gdb: str,
+    nodata_value: int = 1,
+    workspace: str | None = None,
+    timeout_seconds: int = 600,
+) -> dict[str, Any]:
+    """Batch reclassify multiple rasters to a common 1-5 suitability scale."""
+    try:
+        output_gdb = _validate_gis_path(output_gdb, "output_gdb")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "reclassify_criteria", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_reclassify_criteria_code(
+                reclass_table_json=reclass_table,
+                output_gdb=output_gdb,
+                nodata_value=nodata_value,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "reclassify_criteria",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="reclassify_criteria",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Reclassification completed." if result.status == "success" else None,
+        inputs={
+            "output_gdb": output_gdb,
+            "nodata_value": nodata_value,
+        },
+    )
+
+
+@mcp.tool()
+def weighted_suitability(
+    model_name: str,
+    criteria: str,
+    output_raster: str,
+    normalize: bool = True,
+    eval_min: float = 1.0,
+    eval_max: float = 5.0,
+    workspace: str | None = None,
+    timeout_seconds: int = 600,
+) -> dict[str, Any]:
+    """Weighted Linear Combination of reclassified criteria rasters."""
+    try:
+        output_raster = _validate_gis_path(output_raster, "output_raster")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "weighted_suitability", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_weighted_suitability_code(
+                model_name=model_name,
+                criteria_json=criteria,
+                output_raster=output_raster,
+                normalize=normalize,
+                eval_min=eval_min,
+                eval_max=eval_max,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "weighted_suitability",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="weighted_suitability",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Suitability model completed." if result.status == "success" else None,
+        inputs={
+            "model_name": model_name,
+            "output_raster": output_raster,
+            "normalize": normalize,
+        },
+    )
+
+
+@mcp.tool()
+def conflict_analysis(
+    conservation_raster: str,
+    urban_raster: str,
+    threshold: float = 4.0,
+    output_gdb: str = "",
+    land_use_raster: str | None = None,
+    cell_size_area_ha: float | None = None,
+    workspace: str | None = None,
+    timeout_seconds: int = 600,
+) -> dict[str, Any]:
+    """Identify conflict zones and create allocation map from two suitability rasters."""
+    try:
+        conservation_raster = _validate_gis_path(conservation_raster, "conservation_raster")
+        urban_raster = _validate_gis_path(urban_raster, "urban_raster")
+        land_use_raster = _validate_gis_path(land_use_raster, "land_use_raster")
+        output_gdb = _validate_gis_path(output_gdb, "output_gdb")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "conflict_analysis", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_conflict_analysis_code(
+                conservation_raster=conservation_raster,
+                urban_raster=urban_raster,
+                threshold=threshold,
+                output_gdb=output_gdb,
+                land_use_raster=land_use_raster,
+                cell_size_area_ha=cell_size_area_ha,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "conflict_analysis",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="conflict_analysis",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Conflict analysis completed." if result.status == "success" else None,
+        inputs={
+            "conservation_raster": conservation_raster,
+            "urban_raster": urban_raster,
+            "threshold": threshold,
+            "output_gdb": output_gdb,
+        },
+    )
+
+
+@mcp.tool()
+def raster_area_summary(
+    raster_path: str,
+    cell_area_ha: float | None = None,
+    output_csv: str | None = None,
+    workspace: str | None = None,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
+    """Compute area statistics by suitability class for report tables."""
+    try:
+        raster_path = _validate_gis_path(raster_path, "raster_path")
+        output_csv = _validate_gis_path(output_csv, "output_csv")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "raster_area_summary", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_raster_area_summary_code(
+                raster_path=raster_path,
+                cell_area_ha=cell_area_ha,
+                output_csv=output_csv,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "raster_area_summary",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="raster_area_summary",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Area summary completed." if result.status == "success" else None,
+        inputs={
+            "raster_path": raster_path,
+            "cell_area_ha": cell_area_ha,
+            "output_csv": output_csv,
+        },
+    )
+
+
+@mcp.tool()
+def sensitivity_check(
+    conservation_rasters: str,
+    urban_rasters: str,
+    conservation_weights: str,
+    urban_weights: str,
+    baseline_allocation: str,
+    perturbation_pct: float = 10.0,
+    thresholds: str = "[3.5, 4.0, 4.5]",
+    output_gdb: str = "",
+    output_csv: str | None = None,
+    workspace: str | None = None,
+    timeout_seconds: int = 1800,
+) -> dict[str, Any]:
+    """Run WLC with perturbed weights and report allocation change sensitivity."""
+    try:
+        baseline_allocation = _validate_gis_path(baseline_allocation, "baseline_allocation")
+        output_gdb = _validate_gis_path(output_gdb, "output_gdb")
+        output_csv = _validate_gis_path(output_csv, "output_csv")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "sensitivity_check", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_sensitivity_check_code(
+                conservation_rasters_json=conservation_rasters,
+                urban_rasters_json=urban_rasters,
+                conservation_weights_json=conservation_weights,
+                urban_weights_json=urban_weights,
+                baseline_allocation=baseline_allocation,
+                perturbation_pct=perturbation_pct,
+                thresholds_json=thresholds,
+                output_gdb=output_gdb,
+                output_csv=output_csv,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "sensitivity_check",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="sensitivity_check",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Sensitivity analysis completed." if result.status == "success" else None,
+        inputs={
+            "baseline_allocation": baseline_allocation,
+            "perturbation_pct": perturbation_pct,
+            "output_gdb": output_gdb,
+        },
+    )
+
+
+@mcp.tool()
+def export_suitability_map(
+    project_path: str,
+    raster_path: str,
+    map_name: str = "Suitability",
+    title: str = "Suitability Map",
+    subtitle: str | None = None,
+    classification: str = "",
+    output_format: str = "PDF",
+    output_path: str = "",
+    dpi: int = 300,
+    workspace: str | None = None,
+    timeout_seconds: int = 300,
+) -> dict[str, Any]:
+    """Create a publication-quality layout and export to PDF or PNG."""
+    try:
+        project_path = _validate_gis_path(project_path, "project_path")
+        raster_path = _validate_gis_path(raster_path, "raster_path")
+        output_path = _validate_gis_path(output_path, "output_path")
+        workspace = _validate_gis_path(workspace, "workspace")
+    except ValueError as exc:
+        return {"tool": "export_suitability_map", "status": "error", "message": str(exc)}
+    try:
+        result = run_in_arcgis_env(
+            build_export_suitability_map_code(
+                project_path=project_path,
+                raster_path=raster_path,
+                map_name=map_name,
+                title=title,
+                subtitle=subtitle,
+                classification_json=classification,
+                output_format=output_format,
+                output_path=output_path,
+                dpi=dpi,
+            ),
+            workspace=workspace,
+            timeout_seconds=timeout_seconds,
+            require_arcpy=True,
+        )
+    except ArcGISDiscoveryError as exc:
+        return {
+            "tool": "export_suitability_map",
+            "status": "unavailable",
+            "message": str(exc),
+        }
+    return build_tool_payload(
+        result,
+        tool_name="export_suitability_map",
+        result_to_dict=result_to_dict,
+        coerce_result_data=coerce_result_data,
+        message="Map export completed." if result.status == "success" else None,
+        inputs={
+            "project_path": project_path,
+            "raster_path": raster_path,
+            "map_name": map_name,
+            "output_format": output_format,
+            "output_path": output_path,
+            "dpi": dpi,
+        },
+    )
 
 
 def main() -> None:

@@ -14,7 +14,15 @@ from arcgis_runtime_utils import build_arcgis_subprocess_env, remove_tree
 from arcgis_script_templates import (
     build_buffer_features_code,
     build_clip_features_code,
+    build_conflict_analysis_code,
+    build_export_suitability_map_code,
     build_gdb_schema_code,
+    build_prepare_analysis_inputs_code,
+    build_raster_area_summary_code,
+    build_reclassify_criteria_code,
+    build_sensitivity_check_code,
+    build_validate_project_data_code,
+    build_weighted_suitability_code,
 )
 
 TEST_TEMP_ROOT = Path.cwd() / ".tmp-tests"
@@ -671,6 +679,456 @@ class TemplateCompilationTests(unittest.TestCase):
     def test_gdb_schema_code_handles_special_chars(self) -> None:
         code = build_gdb_schema_code(r"D:\GIS\Projects\My Data\output.gdb")
         compile(code, "<test>", "exec")
+
+    def test_validate_project_data_code_generates_valid_python(self) -> None:
+        code = build_validate_project_data_code(
+            project_gdb=r"C:\GIS\project_data.gdb",
+            land_values_gdb=r"C:\GIS\land_values.gdb",
+            required_layers_json=json.dumps(["dem", "land_use"]),
+            target_srs="28356",
+            study_area_fc=r"C:\GIS\project_data.gdb\gold_coast_lga",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_prepare_analysis_inputs_code_generates_valid_python(self) -> None:
+        code = build_prepare_analysis_inputs_code(
+            project_gdb=r"C:\GIS\project_data.gdb",
+            land_values_gdb=r"C:\GIS\land_values.gdb",
+            study_area_fc=r"C:\GIS\project_data.gdb\gold_coast_lga",
+            cell_size=30,
+            snap_raster_name="forest_prop",
+            dem_name="dem",
+            distance_sources_json=json.dumps({"water": "water_courses"}),
+            output_gdb=r"C:\GIS\analysis_outputs.gdb",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_reclassify_criteria_code_generates_valid_python(self) -> None:
+        remap = [[0, 200, 5], [200, 500, 4], [500, 10000, 1]]
+        code = build_reclassify_criteria_code(
+            reclass_table_json=json.dumps(
+                [{"input_raster": r"C:\GIS\dist_water", "output_name": "rcl_water", "remap": remap}]
+            ),
+            output_gdb=r"C:\GIS\output.gdb",
+            nodata_value=1,
+        )
+        compile(code, "<test>", "exec")
+
+    def test_weighted_suitability_code_generates_valid_python(self) -> None:
+        code = build_weighted_suitability_code(
+            model_name="conservation",
+            criteria_json=json.dumps(
+                [
+                    {"raster_path": r"C:\GIS\rcl_water", "weight": 0.25},
+                    {"raster_path": r"C:\GIS\rcl_slope", "weight": 0.75},
+                ]
+            ),
+            output_raster=r"C:\GIS\output.gdb\conservation_wlc",
+            normalize=True,
+            eval_min=1.0,
+            eval_max=5.0,
+        )
+        compile(code, "<test>", "exec")
+
+    def test_conflict_analysis_code_generates_valid_python(self) -> None:
+        code = build_conflict_analysis_code(
+            conservation_raster=r"C:\GIS\conservation_wlc",
+            urban_raster=r"C:\GIS\urban_wlc",
+            threshold=4.0,
+            output_gdb=r"C:\GIS\output.gdb",
+            land_use_raster=None,
+            cell_size_area_ha=0.09,
+        )
+        compile(code, "<test>", "exec")
+
+    def test_raster_area_summary_code_generates_valid_python(self) -> None:
+        code = build_raster_area_summary_code(
+            raster_path=r"C:\GIS\conservation_wlc",
+            cell_area_ha=0.09,
+            output_csv=r"C:\GIS\summary.csv",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_sensitivity_check_code_generates_valid_python(self) -> None:
+        code = build_sensitivity_check_code(
+            conservation_rasters_json=json.dumps([r"C:\GIS\c1", r"C:\GIS\c2"]),
+            urban_rasters_json=json.dumps([r"C:\GIS\u1", r"C:\GIS\u2"]),
+            conservation_weights_json=json.dumps([0.5, 0.5]),
+            urban_weights_json=json.dumps([0.5, 0.5]),
+            baseline_allocation=r"C:\GIS\allocation_map",
+            perturbation_pct=10.0,
+            thresholds_json=json.dumps([3.5, 4.0, 4.5]),
+            output_gdb=r"C:\GIS\output.gdb",
+            output_csv=r"C:\GIS\sensitivity.csv",
+        )
+        compile(code, "<test>", "exec")
+
+    def test_export_suitability_map_code_generates_valid_python(self) -> None:
+        code = build_export_suitability_map_code(
+            project_path=r"C:\GIS\project.aprx",
+            raster_path=r"C:\GIS\conservation_wlc",
+            map_name="Conservation",
+            title="Conservation Suitability",
+            subtitle=None,
+            classification_json=json.dumps(
+                [
+                    {"value": 1, "label": "Low", "rgb": [255, 0, 0]},
+                ]
+            ),
+            output_format="PDF",
+            output_path=r"C:\GIS\map.pdf",
+            dpi=300,
+        )
+        compile(code, "<test>", "exec")
+
+
+class ValidateProjectDataToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"overall": "pass", "checks": [], "warnings": [], "errors": []},
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.validate_project_data(
+                project_gdb=r"D:\GIS\project_data.gdb",
+                land_values_gdb=r"D:\GIS\land_values.gdb",
+                required_layers=json.dumps(["dem", "land_use"]),
+                target_srs="28356",
+                study_area_fc=r"D:\GIS\project_data.gdb\gold_coast_lga",
+                timeout_seconds=120,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "validate_project_data")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.validate_project_data(
+                project_gdb=r"D:\GIS\project_data.gdb",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+        self.assertEqual(payload["tool"], "validate_project_data")
+
+
+class PrepareAnalysisInputsToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"outputs": {"dem_30m": "path"}, "cell_size": 30},
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.prepare_analysis_inputs(
+                project_gdb=r"D:\GIS\project_data.gdb",
+                study_area_fc=r"D:\GIS\project_data.gdb\gold_coast_lga",
+                cell_size=30,
+                timeout_seconds=900,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "prepare_analysis_inputs")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.prepare_analysis_inputs(
+                project_gdb=r"D:\GIS\project_data.gdb",
+                study_area_fc=r"D:\GIS\project_data.gdb\gold_coast_lga",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+
+
+class ReclassifyCriteriaToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        remap = [[0, 200, 5], [200, 10000, 1]]
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={"results": [{"output_name": "rcl_water", "status": "success"}]},
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.reclassify_criteria(
+                reclass_table=json.dumps(
+                    [
+                        {
+                            "input_raster": r"D:\GIS\dist_water",
+                            "output_name": "rcl_water",
+                            "remap": remap,
+                        }
+                    ]
+                ),
+                output_gdb=r"D:\GIS\output.gdb",
+                nodata_value=1,
+                timeout_seconds=600,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "reclassify_criteria")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        remap = [[0, 200, 5], [200, 10000, 1]]
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.reclassify_criteria(
+                reclass_table=json.dumps([{
+                    "input_raster": r"D:\GIS\dist_water",
+                    "output_name": "rcl_water",
+                    "remap": remap,
+                }]),
+                output_gdb=r"D:\GIS\output.gdb",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+
+
+class WeightedSuitabilityToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={
+                "model_name": "conservation",
+                "output_path": r"D:\GIS\output.gdb\conservation_wlc",
+                "statistics": {"min": 1.2, "max": 4.8, "mean": 3.1, "std": 0.9},
+            },
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.weighted_suitability(
+                model_name="conservation",
+                criteria=json.dumps(
+                    [
+                        {"raster_path": r"D:\GIS\rcl_water", "weight": 0.5},
+                        {"raster_path": r"D:\GIS\rcl_slope", "weight": 0.5},
+                    ]
+                ),
+                output_raster=r"D:\GIS\output.gdb\conservation_wlc",
+                normalize=True,
+                timeout_seconds=600,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "weighted_suitability")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.weighted_suitability(
+                model_name="conservation",
+                criteria="[]",
+                output_raster=r"D:\GIS\output.gdb\wlc",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+
+
+class ConflictAnalysisToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={
+                "conflict_map": r"D:\GIS\conflict_map",
+                "allocation_map": r"D:\GIS\allocation_map",
+                "conflict_area": {"conflict_ha": 1234.5, "conflict_pct": 1.4},
+            },
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.conflict_analysis(
+                conservation_raster=r"D:\GIS\conservation_wlc",
+                urban_raster=r"D:\GIS\urban_wlc",
+                threshold=4.0,
+                output_gdb=r"D:\GIS\output.gdb",
+                timeout_seconds=600,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "conflict_analysis")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.conflict_analysis(
+                conservation_raster=r"D:\GIS\conservation_wlc",
+                urban_raster=r"D:\GIS\urban_wlc",
+                output_gdb=r"D:\GIS\output.gdb",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+
+
+class RasterAreaSummaryToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={
+                "raster": r"D:\GIS\conservation_wlc",
+                "cell_area_ha": 0.09,
+                "total_area_ha": 98000.0,
+                "classes": [{"class": 1, "cell_count": 50000, "area_ha": 4500.0}],
+            },
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.raster_area_summary(
+                raster_path=r"D:\GIS\conservation_wlc",
+                cell_area_ha=0.09,
+                output_csv=r"D:\GIS\summary.csv",
+                timeout_seconds=120,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "raster_area_summary")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.raster_area_summary(
+                raster_path=r"D:\GIS\conservation_wlc",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+
+
+class SensitivityCheckToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={
+                "total_scenarios": 30,
+                "most_sensitive": "Conservation_C1",
+                "most_sensitive_pct": "2.30",
+                "csv_path": r"D:\GIS\sensitivity.csv",
+            },
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.sensitivity_check(
+                conservation_rasters=json.dumps([r"D:\GIS\c1", r"D:\GIS\c2"]),
+                urban_rasters=json.dumps([r"D:\GIS\u1", r"D:\GIS\u2"]),
+                conservation_weights=json.dumps([0.5, 0.5]),
+                urban_weights=json.dumps([0.5, 0.5]),
+                baseline_allocation=r"D:\GIS\allocation_map",
+                perturbation_pct=10.0,
+                thresholds=json.dumps([3.5, 4.0, 4.5]),
+                output_gdb=r"D:\GIS\output.gdb",
+                timeout_seconds=1800,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "sensitivity_check")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.sensitivity_check(
+                conservation_rasters="[]",
+                urban_rasters="[]",
+                conservation_weights="[]",
+                urban_weights="[]",
+                baseline_allocation=r"D:\GIS\allocation_map",
+                output_gdb=r"D:\GIS\output.gdb",
+            )
+        self.assertEqual(payload["status"], "unavailable")
+
+
+class ExportSuitabilityMapToolTests(unittest.TestCase):
+    def test_wraps_execution_result(self) -> None:
+        execution_result = server.ArcPyExecutionResult(
+            status="success",
+            exit_code=0,
+            python_executable=sys.executable,
+            stdout="",
+            stderr="",
+            data={
+                "output_path": r"D:\GIS\map.pdf",
+                "format": "PDF",
+                "dpi": 300,
+                "file_size_mb": 2.5,
+            },
+        )
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            return_value=execution_result,
+        ) as mocked_run:
+            payload = server.export_suitability_map(
+                project_path=r"D:\GIS\project.aprx",
+                raster_path=r"D:\GIS\conservation_wlc",
+                map_name="Conservation",
+                title="Conservation Suitability",
+                output_format="PDF",
+                output_path=r"D:\GIS\map.pdf",
+                dpi=300,
+                timeout_seconds=300,
+            )
+        mocked_run.assert_called_once()
+        self.assertEqual(payload["tool"], "export_suitability_map")
+        self.assertEqual(payload["status"], "success")
+
+    def test_returns_unavailable_when_discovery_fails(self) -> None:
+        with patch(
+            "arcgis_mcp_server.run_in_arcgis_env",
+            side_effect=server.ArcGISDiscoveryError("ArcGIS Pro Python not found"),
+        ):
+            payload = server.export_suitability_map(
+                project_path=r"D:\GIS\project.aprx",
+                raster_path=r"D:\GIS\conservation_wlc",
+                output_path=r"D:\GIS\map.pdf",
+            )
+        self.assertEqual(payload["status"], "unavailable")
 
 
 if __name__ == "__main__":

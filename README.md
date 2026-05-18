@@ -70,6 +70,14 @@ Ask OpenCode:
 | `clip_features` | Clip geoprocessing tool |
 | `execute_arcpy_code` | Run arbitrary ArcPy code |
 | `generate_sync_plan` | Generate sync plan |
+| `validate_project_data` | Pre-flight data validation |
+| `prepare_analysis_inputs` | Clip, resample, slope, distance rasters |
+| `reclassify_criteria` | Batch reclassify rasters to 1-5 scale |
+| `weighted_suitability` | Weighted Linear Combination (WLC) |
+| `conflict_analysis` | Conflict zones and allocation maps |
+| `raster_area_summary` | Area statistics by class |
+| `sensitivity_check` | Weight perturbation sensitivity analysis |
+| `export_suitability_map` | Layout creation and PDF/PNG export |
 
 ## Available Resources
 

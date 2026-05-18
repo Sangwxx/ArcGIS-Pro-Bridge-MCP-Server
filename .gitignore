@@ -36,3 +36,8 @@ arcgis-mcp-*/
 
 # Assignment files
 analysis_plan.txt
+
+# Planning documents (working copies)
+Build-plan.md
+Extension plan.txt
+Process reference.txt
