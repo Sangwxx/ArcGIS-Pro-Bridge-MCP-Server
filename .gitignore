@@ -17,6 +17,9 @@ __pycache__/
 .coverage
 coverage.xml
 
+# Build artifacts
+*.egg-info/
+
 # IDE and system files
 .idea/
 .vscode/
@@ -30,3 +33,6 @@ Thumbs.db
 .tmp-shell/
 .tmp-tests/
 arcgis-mcp-*/
+
+# Assignment files
+analysis_plan.txt

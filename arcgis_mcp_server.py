@@ -101,10 +101,6 @@ class ArcGISDiscoveryError(RuntimeError):
     """Raised when ArcGIS Pro environment cannot be discovered."""
 
 
-class ArcGISProNotRunningError(RuntimeError):
-    """Raised when open_current_project=True but ArcGIS Pro is not running."""
-
-
 def is_running_inside_pro() -> bool:
     """Detect whether this process is running inside ArcGIS Pro's Python window.
 
