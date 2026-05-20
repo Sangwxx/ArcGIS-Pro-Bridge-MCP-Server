@@ -126,6 +126,21 @@ See `examples/claude-desktop-mcp-config.json`
 | `ARCGIS_PRO_INSTALL_DIR` | Path to ArcGIS Pro installation |
 | `ARCGIS_MCP_ALLOWED_PATHS` | Colon-separated allowed paths (optional) |
 
+## WLC Suitability Workflow Example
+
+A typical land-use suitability analysis using the raster tools:
+
+```
+1. validate_project_data    → Check all layers are present and valid
+2. prepare_analysis_inputs  → Clip to study area, resample to common cell size, derive slope/distances
+3. reclassify_criteria      → Reclassify each criterion raster to a 1–5 suitability scale
+4. weighted_suitability     → Run Weighted Linear Combination with assigned weights
+5. conflict_analysis        → Compare Conservation vs Urban suitability to identify conflict zones
+6. raster_area_summary      → Get area breakdown by suitability class
+7. sensitivity_check        → Perturb weights to test robustness
+8. export_suitability_map   → Export final map as PDF/PNG with layout
+```
+
 ## Safety
 
 - `execute_arcpy_code` requires explicit user confirmation
@@ -166,6 +181,8 @@ uv run ruff format --check .
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) - Agent instructions
+- [CHANGELOG.md](CHANGELOG.md) - Version history
+- [SECURITY.md](SECURITY.md) - Security considerations
 - [FUTURE_WORK.md](FUTURE_WORK.md) - Future development plans
 - [examples/](examples/) - MCP configuration examples
 
