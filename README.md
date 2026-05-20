@@ -1,5 +1,7 @@
 # ArcGIS Pro Bridge MCP Server
 
+> **Fork of [Sangwxx/ArcGIS-Pro-Bridge-MCP-Server](https://github.com/Sangwxx/ArcGIS-Pro-Bridge-MCP-Server)** with modifications for OpenCode integration, English documentation, and additional raster analysis tools.
+
 A local MCP server that connects AI agents (OpenCode, Trae, Cursor, Claude Desktop) to ArcGIS Pro, enabling AI-assisted GIS workflows.
 
 ## What It Does
