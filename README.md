@@ -138,7 +138,6 @@ A typical land-use suitability analysis using the raster tools:
 5. conflict_analysis        → Compare Conservation vs Urban suitability to identify conflict zones
 6. raster_area_summary      → Get area breakdown by suitability class
 7. sensitivity_check        → Perturb weights to test robustness
-8. export_suitability_map   → Export final map as PDF/PNG with layout
 ```
 
 ## Safety
