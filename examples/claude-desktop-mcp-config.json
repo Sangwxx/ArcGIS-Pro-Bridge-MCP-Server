@@ -1,12 +1,11 @@
 {
   "mcpServers": {
     "arcgis-pro-bridge": {
-      "command": "uv",
+      "command": "cmd",
       "args": [
-        "run",
-        "arcgis_mcp_server.py"
-      ],
-      "cwd": "D:\\ArcgisproMCP"
+        "/c",
+        "<项目目录>\\start-mcp-server.bat"
+      ]
     }
   }
 }

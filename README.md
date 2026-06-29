@@ -114,11 +114,13 @@ README 或 `examples/` 目录里提供的 JSON 配置，不是复制到 PowerShe
 
 ### 第二步：把 MCP 配置加到客户端
 
+**重要**：配置 JSON 中的 `<项目目录>` 必须替换为你克隆项目的实际路径，直接复制会导致服务无法启动。
+
 具体可复制配置请看：
 
-- [examples/cursor-mcp-config.json](examples/cursor-mcp-config.json)
-- [examples/claude-desktop-mcp-config.json](examples/claude-desktop-mcp-config.json)
-- [examples/README.md](examples/README.md)
+- [examples/claude-desktop-mcp-config.json](examples/claude-desktop-mcp-config.json)（Claude Desktop）
+- [examples/cursor-mcp-config.json](examples/cursor-mcp-config.json)（Cursor / Trae）
+- [examples/README.md](examples/README.md)（详细说明）
 
 ### 第三步：重启客户端
 
@@ -179,19 +181,23 @@ Cursor 的思路和 Trae 类似，也是把 MCP 配置写入它的 MCP 配置位
 
 ## 如何接入 Claude Desktop
 
-Claude Desktop 一般也是通过 MCP 配置文件接入。
+Claude Desktop 通过 MCP 配置文件接入，需要特别注意 Windows 下的 PATH 问题。
 
-建议做法：
+**推荐方式（使用批处理启动脚本）：**
 
 1. 找到 Claude Desktop 的 MCP 配置文件
-2. 把示例 JSON 加到 `mcpServers`
+2. 按 [examples/claude-desktop-mcp-config.json](examples/claude-desktop-mcp-config.json) 填写，**替换 `<项目目录>` 为实际路径**
 3. 保存文件
 4. 完全退出 Claude Desktop
 5. 重新打开 Claude Desktop
 
-可参考：
+**为什么推荐用批处理脚本？**
 
-- [examples/claude-desktop-mcp-config.json](examples/claude-desktop-mcp-config.json)
+Claude Desktop 是 Windows GUI 应用，它的 PATH 环境变量与终端不同。即使你在终端里能跑 `uv`，Claude Desktop 也可能找不到它。项目根目录的 `start-mcp-server.bat` 会自动在常见位置查找 `uv`，并设置正确的工作目录。
+
+**备选方式（直接使用 uv）：**
+
+如果你已将 `uv` 所在目录添加到 Windows 系统 PATH（而非仅用户 PATH），也可以参考 [examples/cursor-mcp-config.json](examples/cursor-mcp-config.json) 使用 `uv run` 方式。
 
 ## 第一次使用时建议怎么问
 
@@ -282,6 +288,33 @@ Claude Desktop 一般也是通过 MCP 配置文件接入。
 - `arcgis://gdb/{gdb_ref}/schema`
 
 ## 常见问题
+
+### 0. Claude Desktop 无法连接 / Server 未出现
+
+如果配置完成后 Claude Desktop 没有识别到 MCP Server，或报连接失败，请按顺序排查：
+
+**先确认 Server 本身能启动：**
+在项目目录下打开终端，运行 `uv run python arcgis_mcp_server.py`，如果不报错且进入等待状态，说明 Server 本身没问题。
+
+**检查配置文件中的路径：**
+- 确认 `<项目目录>` 已替换为你的实际路径
+- 确认路径中的反斜杠正确（JSON 中需写成 `\\`）
+- 确认 `start-mcp-server.bat` 确实存在于项目根目录
+
+**检查 uv 是否对 GUI 应用可见：**
+- 打开新的 CMD 窗口，运行 `where uv`
+- 如果显示路径在 `%USERPROFILE%\\.local\\bin\\` 下，Claude Desktop 很可能找不到它
+- 解决方案：使用 `cmd /c` + 批处理脚本方式配置（见 Claude Desktop 接入章节）
+
+**检查 Claude Desktop 日志：**
+- Claude Desktop 的日志通常位于 `%APPDATA%\\Claude Desktop\\logs\\`
+- 查看最新日志文件中是否有 `arcgis-pro-bridge` 相关报错
+
+**确认配置文件位置正确：**
+- Claude Desktop 的 MCP 配置文件通常在：`%APPDATA%\\Claude Desktop\\claude_desktop_config.json`
+- 如果文件不存在，需要手动创建
+
+如果以上都检查过仍未解决，请在项目 Issues 中附上 Claude Desktop 日志中的相关错误信息。
 
 ### 1. 找不到 ArcGIS Pro 或找不到 arcpy
 
